@@ -1,0 +1,10 @@
+name = "ScopedStreams"
+uuid = "ae12ab41-8e94-49b1-b3b7-5c73acb71980"
+authors = ["Jiacheng Chuan <jiacheng_chuan@outlook.com>"]
+version = "0.1.0"
+
+[deps]
+ScopedValues = "7e506255-f358-4e82-b7e4-beb19740aa63"
+
+[compat]
+ScopedValues = "1"
