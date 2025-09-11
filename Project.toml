@@ -4,7 +4,14 @@ authors = ["Jiacheng Chuan <jiacheng_chuan@outlook.com>"]
 version = "0.1.0"
 
 [deps]
+HashArrayMappedTries = "076d061b-32b6-4027-95e0-9a2c6f6d7e74"
+InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
+Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 ScopedValues = "7e506255-f358-4e82-b7e4-beb19740aa63"
 
 [compat]
+HashArrayMappedTries = "0.2.0"
+InteractiveUtils = "1"
+Logging = "1"
 ScopedValues = "1"
+julia = "^1.8"

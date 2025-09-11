@@ -6,10 +6,6 @@ using Test
 
 @testset begin
 
-    gen_ioref_methods()
-
-    stdout0 = Base.stdout
-    stdoutref = IORef(stdout)
-    Base._redirect_io_global(stdoutref, 1)
-    Base.stdout = stdoutref
+    @test Base.stdout isa ScopedStream
+    @test Base.stderr isa ScopedStream
 end

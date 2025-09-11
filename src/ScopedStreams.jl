@@ -1,6 +1,11 @@
 module ScopedStreams
 
 using ScopedValues
+using Logging
+import InteractiveUtils: methodswith
+
+export ScopedStream, deref, gen_scoped_stream_methods, redirect_stream
+
 
 stdout_origin = nothing  # re-defined in __init__()
 stderr_origin = nothing  # re-defined in __init__()
@@ -9,11 +14,126 @@ mutable struct ScopedStream <: IO
     ref::ScopedValue{IO}
 end
 
-ScopedStream(io::ScopedStream) = ScopedStream(io.ref[])
-ScopedStream(io::IO) = ScopedStream(Ref{IO}(io))
+ScopedStream(io::ScopedStream) = io
+ScopedStream(io::IO) = ScopedStream(ScopedValue{IO}(io))
 
 @inline deref(io::ScopedStream) = io.ref[]
 @inline deref(io) = io
+
+"""
+    gen_scoped_stream_methods()
+
+Generate methods for `ScopedStream` from existing methods with `IO` in all **currently** loaded modules. Eg:
+
+```julia
+# The existing method of `IO` as an template
+Base.write(io::IO, x::UInt8)
+
+# to generated the method for `ScopedStream`:
+Base.write(io::ScopedStream, x::UInt8) = Base.write(deref(io), x)
+```
+
+The function is called in `ScopedStreams.init()`. You can also manually run it to refresh existing functions and include newly defined functions.
+"""
+function gen_scoped_stream_methods()
+    # https://github.com/JuliaLang/julia/blob/v1.11.6/base/methodshow.jl#L80
+    ms = methodswith(IO)
+    failed_ids = Int[]
+    failed_strs = String[]
+
+    io_ref_type_str = string("::", @__MODULE__, ".ScopedStream")
+    deref_pref_str = string(@__MODULE__, ".deref(")
+
+    # create a new module to import all currently loaded modules, and generate ScopedStream methods there: keep other modules clean. 
+    Core.eval(Main, Expr(:module, true, :__ScopedStreamsTmp, quote end)) # module __ScopedStreamsTmp end
+    Core.eval(Main.__ScopedStreamsTmp, Expr(:using, Expr(:., :ScopedValues))) # using ScopedValues
+
+    for modul in Base.loaded_modules_array()
+        @debug "Using $modul in Main.__ScopedStreamsTmp"
+        Core.eval(Main.__ScopedStreamsTmp, Expr(:using, Expr(:., Symbol(modul)))) # using xxx
+    end
+
+    for (x, m) in enumerate(ms)
+        # Construct "$left $where_expr = $right" like:
+        # Modul.func(io::ScopedStream, a::T, b; kw...) where T = Modul.func(deref(io), a, b; kw...)
+
+        modul = m.module
+        modul_str = string(modul)
+        # skip module self
+        if modul == @__MODULE__
+            continue
+        end
+        # only apply to all modules that are currently imported into __ScopedStreamsTmp
+        if !isdefined(Main.__ScopedStreamsTmp, Symbol(modul)) && !startswith(modul_str, "Base.")
+            @debug "Skip module: $modul"
+            continue
+        end
+        tv, decls, file, line = Base.arg_decl_parts(m)
+        func_name = decls[1][2]
+
+        where_IO_var = String[]  # like IOT in `where IOT<:IO`
+        where_expr = ""  # where T where V<:Type
+        m_sig = m.sig
+        while m_sig isa UnionAll 
+            if m_sig.var isa Base.TypeVar
+                # find T in `where T<:IO`
+                if m.sig.var.ub === IO
+                    push!(where_IO_var, string(m.sig.var.name))
+                    m_sig = m_sig.body
+                    continue  # do not add where
+                end
+            end
+            where_expr *= "where $(m_sig.var) "
+            m_sig = m_sig.body
+        end
+
+        left = string(modul_str, ".", func_name, "(")
+        right = left
+        for (i,d) in enumerate(@view decls[2:end])
+            @inbounds if d[1] == ""
+                d = ("__var_$i", d[2])
+            end
+            @inbounds if !isempty(d[2])
+                if IO_in_type_str(d[2], where_IO_var)
+                    left  = string(left , d[1], io_ref_type_str)
+                    right = string(right, deref_pref_str, d[1], ")")
+                else
+                    left = string(left, d[1], "::", d[2])
+                    right = string(right, d[1])
+                end
+            else
+                left = string(left, d[1])
+                right = string(right, d[1])
+            end
+            if i < length(decls) - 1
+                left  *= ", "
+                right *= ", "
+            end
+        end
+
+        kwargs = Base.kwarg_decl(m)  # Vector{Symbol}, eg: [], [:keep], [Symbol("kw...")]
+        if !isempty(kwargs)
+            left  *= "; __kw..."
+            right *= "; __kw..."
+        end
+
+        left  *= ")"
+        right *= ")"
+
+        str = "$left $where_expr = $right"
+        @debug "[$x] $str"
+
+        try
+            Core.eval(Main.__ScopedStreamsTmp, Meta.parse(str))
+        catch e
+            @error e
+            push!(failed_ids, x)
+            push!(failed_strs, str)
+        end
+    end
+
+    failed_ids, failed_strs
+end
 
 """
     IO_in_type_str(s::String, where_IO_var::Vector{String})
@@ -36,108 +156,206 @@ function IO_in_type_str(s::String, where_IO_var::Vector{String})
     return false
 end
 
-"""
-    gen_ioref_methods(mo::Module = @__MODULE__)
+### extend IO
 
-Generate methods for `ScopedStream` from `IO` from all currently available modules that is defined or (imported) in `mo::Module`.
-
-The function is called in `Pipelines.__init__()` and only apply to modules that are loaded and imported before Pipelines. You can manually run the function for methods defined in other modules.
-"""
-function gen_ioref_methods(mo::Module = @__MODULE__)
-    # https://github.com/JuliaLang/julia/blob/v1.11.6/base/methodshow.jl#L80
-    ms = methodswith(IO)
-    failed_ids = Int[]
-    failed_strs = String[]
-
-    io_ref_type_str = string("::", @__MODULE__, ".ScopedStream")
-    deref_pref_str = string(@__MODULE__, ".deref(")
-
-    for (x, m) in enumerate(ms)
-        # Construct "$left $where_expr = $right" like:
-        # Modul.func(io::ScopedStream, a::T, b; kw...) where T = Modul.func(deref(io), a::T, b; kw...)
-
-        modul = m.module
-        # only apply to all module that is currently imported
-        if !isdefined(mo, Symbol(modul))
-            # @info "Skip module: $modul"
-            continue
-        end
-        tv, decls, file, line = Base.arg_decl_parts(m)
-        func_name = decls[1][2]
-
-        where_IO_var = String[]  # like IOT in `where IOT<:IO`
-        where_expr = ""  # where T where V<:Type
-        m_sig = m.sig
-        while m_sig isa UnionAll 
-            if m_sig.var isa Base.TypeVar
-                # find T in `where T<:IO`
-                if m.sig.var.ub === IO
-                    push!(where_IO_var, string(m.sig.var.name))
-                    m_sig = m_sig.body
-                    continue  # do not add where
-                end
-            end
-            where_expr *= "where $(m_sig.var) "
-            m_sig = m_sig.body
-        end
-
-        left = string(modul, ".", func_name, "(")
-        right = left
-        for (i,d) in enumerate(@view decls[2:end])
-            if d[1] == ""
-                d = ("__var_$i", d[2])
-            end
-            if !isempty(d[2])
-                if IO_in_type_str(d[2], where_IO_var)
-                    left  = string(left , d[1], io_ref_type_str)
-                    right = string(right, deref_pref_str, d[1], ")")
-                else
-                    left = string(left, d[1], "::", d[2])
-                    right = string(right, d[1], "::", d[2])
-                end
-            else
-                left = string(left, d[1])
-                right = string(right, d[1])
-            end
-            if i < length(decls)-1
-                left  *= ", "
-                right *= ", "
-            end
-        end
-
-        kwargs = Base.kwarg_decl(m)  # Vector{Symbol}, eg: [], [:keep], [Symbol("kw...")]
-        if !isempty(kwargs)
-            left  *= "; "
-            right *= "; "
-            for kw in kwargs
-                skw = Base.sym_to_string(kw)
-                if skw == "..."
-                    skw = "__kw..."
-                end
-                left  *= skw
-                right *= skw
-                if kw != last(kwargs)
-                    left  *= ", "
-                    right *= ", "
-                end
-            end
-        end
-
-        left  *= ")"
-        right *= ")"
-
-        str = "$left $where_expr = $right"
-        # println("[$x] $str")
-
-        try
-            Core.eval(mo, Meta.parse(str))
-        catch e
-            @error e
-            push!(failed_ids, x)
-            push!(failed_strs, str)
-        end
-    end
-    failed_ids, failed_strs
+Base.close(::Nothing) = nothing
+Base.redirect_stdout(f::Function, ::Nothing) = f()
+# redirect_stdout and redirect_stderr are the same (::Base.RedirectStdStream) at least from julia v1.7, so defining redirect_stdout means redirect_stderr is also defined. If diff exists in previous julia versions, check first.
+if !hasmethod(Base.redirect_stderr, (Function, Nothing))
+    Base.redirect_stderr(f::Function, ::Nothing) = f()
 end
+
+handle_open(::Nothing, mode) = nothing
+handle_open(io::IO, mode) = io # do not change and do not close when exit
+handle_open(io::ScopedStream, mode) = deref(io)
+handle_open(file::AbstractString, mode) = open(file::AbstractString, mode)
+
+handle_open_log(::Nothing, mode) = nothing
+handle_open_log(io::IO, mode) = io # do not change and do not close when exit
+handle_open_log(io::ScopedStream, mode) = deref(io)
+handle_open_log(file::AbstractString, mode) = open(file::AbstractString, mode)
+
+handle_open_log(logger::AbstractLogger, mode) = logger
+
+Logging.with_logger(f::Function, logger::Nothing) = f()
+function Logging.with_logger(f::Function, io::IO)
+    logger = SimpleLogger(io)
+    Logging.with_logger(f, logger)
+end
+
+handle_finally(file::Nothing, io) = nothing
+handle_finally(file::IO, io) = flush(io)
+handle_finally(file::AbstractString, io) = close(io)
+handle_finally(file::AbstractLogger, io) = nothing
+
+### main redirection
+# printstyled()
+"""
+    redirect_stream(f::Function, file; mode="a+")
+    redirect_stream(f::Function, outfile, errfile; mode="a+")
+    redirect_stream(f::Function, outfile, errfile, logfile; mode="a+")
+
+Redirect outputs of function `f` to streams/file(s).
+
+!!! info "Manual Initialization Needed"
+    You have to call `ScopedStreams.init()` before using `redirect_stream(...)`
+
+- `file`, `outfile`, `errfile`: can be file path (`AbstractString`), stream (`IO`), or `nothing`. Nothing means no redirect.
+- `logfile`: besides the types supported by `file`, also support `AbstractLogger`.
+- `mode`: same as `open(..., mode)`. Only used when any file is `AbstractString`.
+
+Caution: If `xxxfile` is an `IO` or `AbstractLogger`, it won't be closed. Please use `close(io)` or `JobSchedulers.close_in_future(io, jobs)` manually.
+"""
+function redirect_stream(f::Function, outfile, errfile, logfile; mode="a+")
+
+    @assert Base.stdout isa ScopedStream "redirect_stream(...) check failed: Base.stdout is changed or not initiated. Please run ScopedStreams.init()"
+    @assert Base.stderr isa ScopedStream "redirect_stream(...) check failed: Base.stdout is changed or not initiated. Please run ScopedStreams.init()"
+
+    out = handle_open(outfile, mode)
+    err = errfile == outfile ? out : handle_open(errfile, mode)
+    log = logfile == outfile ? out : logfile == errfile ? err : handle_open_log(logfile, mode)
+
+    if isnothing(out)
+        out = deref(Base.stdout)
+    end
+    if isnothing(err)
+        err = deref(Base.stderr)
+    end
+
+    try
+        @with Base.stdout=>out Base.stderr=>err begin
+            with_logger(f, log)
+        end
+    catch
+        rethrow()
+    finally
+        # close or flush or do nothing
+        handle_finally(outfile, out)
+        handle_finally(errfile, out)
+        handle_finally(logfile, out)
+    end
+end
+
+redirect_stream(f::Function, outfile, errfile; mode="a+") = redirect_stream(f::Function, outfile, errfile, errfile; mode=mode)
+
+redirect_stream(f::Function, outfile; mode="a+") = redirect_stream(f::Function, outfile, outfile, outfile; mode=mode)
+
+function __init__()
+end
+
+"""
+    ScopedStreams.init()
+
+Initializing ScopedStreams: Enable scope-dependent Base.stdout and Base.stderr, allowing each task to have its own isolated standard output and error streams.
+
+You have to call `ScopedStreams.init()` before using `redirect_stream(...)`
+"""
+function init()
+    global stdout_origin
+    global stderr_origin
+
+    # save original stdxxx to stdxxx_origin
+    if isnothing(stdout_origin)
+        if Base.stdout isa ScopedStream
+            nothing
+        elseif Base.stdout isa Base.TTY
+            nothing
+        elseif occursin(r"<fd .*>|RawFD\(\d+\)|WindowsRawSocket\(", string(Base.stdout))
+            nothing
+        else
+            # Not Terminal (TTY), nor linux file redirection (fd)
+            @warn "Base.stdout was changed when initiating ScopedStreams." Base.stdout
+        end
+        stdout_origin = deref(Base.stdout)
+    end
+    if isnothing(stderr_origin)
+        if Base.stdout isa ScopedStream
+            nothing
+        elseif Base.stderr isa Base.TTY
+           nothing
+        elseif occursin(r"<fd .*>|RawFD\(\d+\)|WindowsRawSocket\(", string(Base.stderr))
+            nothing
+        else
+            # Not Terminal (TTY), nor linux file redirection (fd)
+            @warn "Base.stderr was changed when initiating ScopedStreams." Base.stderr
+        end
+        stderr_origin = deref(Base.stderr)
+    end
+    
+    gen_scoped_stream_methods()
+
+    Base._redirect_io_global(ScopedStream(Base.stdout), 1)
+    Base._redirect_io_global(ScopedStream(Base.stderr), 2)
+end
+
+"""
+    restore_stream()
+
+Reset Base.stdout and Base.stderr to the original stream that captured at `ScopedStreams.init()`.
+"""
+function restore_stream()
+    global stdout_origin
+    global stderr_origin
+    if !isnothing(stdout_origin)
+        redirect_stdout(stdout_origin)
+    end
+    if !isnothing(stderr_origin)
+        redirect_stderr(stderr_origin)
+    end
+end
+
+# """
+#     get_kwargs(m::Method; kwargs=Base.kwarg_decl(m))
+
+# Return nothing if `m` does not have kwargs, or a `NamedTuple` containing each supported kwarg and its default value for a given method.
+# """
+# function get_kwargs(m::Method; kwargs=Base.kwarg_decl(m))
+#     kwargs_names = Base.kwarg_decl(m)
+#     nkw = length(kwargs_names)
+#     if nkw==0
+#         # no kwargs
+#         return nothing
+#     else
+#         func = Core.eval(m.module, m.name)
+#         args_types = m.sig
+#         # lowered form of the method contains kwargs default values, but some are hidden
+#         code = code_lowered(func, args_types)[1].code
+        
+#         index = -1
+#         for (i, line) in enumerate(code)
+#             line === nothing && continue
+#             if line isa GlobalRef  # ref to the function
+#                 if occursin(string(m.name), string(line.name))
+#                     # found the function, the next line is tuple.
+#                     index = i+1
+#                     break
+#                 end
+#             end
+#             if line isa Expr && occursin(string(m.name), string(line))
+#                 index = i
+#                 break
+#             end
+#         end
+
+#         @assert index>0 "Cannot get_kwargs(m): m=$m"
+
+#         # get lowered value of each kwarg
+#         vals = code[index].args[2:2+nkw-1]
+#         # get back the original value according to the lowered value type
+#         kwargs_values = map(v -> 
+#             if v isa Core.SSAValue
+#                 eval(code[v.id])
+#             elseif v isa GlobalRef || v isa QuoteNode # wrap symbol
+#                 eval(v)
+#             else 
+#                 v
+#             end
+#             , vals)
+#         # reconstruct kwargs
+#         NamedTuple(zip(kwargs_names, kwargs_values))
+#     end
+# end
+
+# atexit(restore_stream)
 
 end # module ScopedStreams
