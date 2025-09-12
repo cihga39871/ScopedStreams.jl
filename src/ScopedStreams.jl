@@ -20,6 +20,59 @@ ScopedStream(io::IO) = ScopedStream(ScopedValue{IO}(io))
 @inline deref(io::ScopedStream) = io.ref[]
 @inline deref(io) = io
 
+filter_base_core!(ms) = filter!(m -> m !== Base && m!== Core, ms)
+
+modules(m::Module) = filter_base_core!(ccall(:jl_module_usings, Any, (Any,), m))
+module_parent(m::Module) = ccall(:jl_module_usings, Any, (Any,), m)
+
+function module_deps(modules_using::Dict{Module})
+    dep_mods = Dict{Module, Vector{Module}}()
+    for (parent, children) in modules_using
+        for child in children
+            if haskey(dep_mods, child)
+                push!(dep_mods[child], parent)
+            else
+                dep_mods[child] = [parent]
+            end
+        end
+    end
+    dep_mods
+end
+
+# Pkg.why()
+
+function module_trace()
+    current_modules = Base.loaded_modules_array() # Vector{Module}
+    modules_using = Dict(m => modules(m) for m in current_modules)
+    dep_modules = module_deps(modules_using)
+
+    traces = Dict{Module, String}()
+
+    essentials = (Base, Core, Main)
+    to_rm_dep_modules = Module[]
+    for (m, deps) in dep_modules
+        m in essentials && continue
+        
+        done_m = false
+        for essential in essentials
+            if essential in deps
+                traces[m] = "$essential.$m"
+                done_m = true
+                push!(to_rm_dep_modules, m)
+                break
+            end
+        end
+        for dep in deps
+            dep_trace = get(traces, dep, nothing)
+        end
+        done_m && continue
+    end
+    for m in to_rm_dep_modules
+        delete!(dep_modules, m)
+    end
+
+end
+
 """
     gen_scoped_stream_methods()
 
@@ -48,10 +101,20 @@ function gen_scoped_stream_methods()
     Core.eval(Main, Expr(:module, true, :__ScopedStreamsTmp, quote end)) # module __ScopedStreamsTmp end
     Core.eval(Main.__ScopedStreamsTmp, Expr(:using, Expr(:., :ScopedValues))) # using ScopedValues
 
-    current_modules = Set(Base.loaded_modules_array())
+    current_modules = Base.loaded_modules_array() # Vector{Module}
+    modules_using = Dict(m => modules(m) for m in current_modules)
+
+    # modules_parent = Dict(m => module_parent(m) for m in current_modules)
+
+    dep_modules = module_deps(modules_using)
+
+    Pkg.dependencies() # Dict{Base.UUID, Pkg.API.PackageInfo}
+
+    filter!(x-> x!==Base && x!==Core && x!==Main, current_modules)
+
     for modul in current_modules
         @debug "Using $modul in Main.__ScopedStreamsTmp"
-        Core.eval(Main.__ScopedStreamsTmp, Expr(:using, Expr(:., Symbol(modul)))) # using xxx
+        Core.eval(Main.__ScopedStreamsTmp, :(try; using $modul; catch; end)) # using xxx
     end
 
     for (x, m) in enumerate(ms)
@@ -149,32 +212,6 @@ function gen_scoped_stream_methods()
 
     failed_methods, failed_strs
 end
-
-# """
-#     IO_in_type_str(s::String, where_IO_var::Vector{String})
-
-# Check whether `s` contains IO type.
-
-# s is result of `string(t::Type)`. 
-# """
-# function IO_in_type_str(s::String, where_IO_var::Dict{String, String})
-#     s == "IO" && (return true)
-#     s in where_IO_var && (return true)
-#     for w in where_IO_var
-#         s == w.first && (return true)
-#     end
-    
-#     # "Union{RawFD, Base.FileRedirect, IO}"
-#     if startswith(s, "Union{")
-#         for var in eachsplit(@view(s[7:end-1]), r", +")
-#             var == "IO" && (return true)
-#             for w in where_IO_var
-#                 var == w.first && (return true)
-#             end
-#         end
-#     end
-#     return false
-# end
 
 function decls_multiple_io(decls, where_IO_var::Dict{String, String})
 
