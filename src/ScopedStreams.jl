@@ -38,7 +38,7 @@ The function is called in `ScopedStreams.init()`. You can also manually run it t
 function gen_scoped_stream_methods()
     # https://github.com/JuliaLang/julia/blob/v1.11.6/base/methodshow.jl#L80
     ms = methodswith(IO)
-    failed_ids = Int[]
+    failed_methods = Method[]
     failed_strs = String[]
 
     io_ref_type_str = string("::", @__MODULE__, ".ScopedStream")
@@ -48,7 +48,8 @@ function gen_scoped_stream_methods()
     Core.eval(Main, Expr(:module, true, :__ScopedStreamsTmp, quote end)) # module __ScopedStreamsTmp end
     Core.eval(Main.__ScopedStreamsTmp, Expr(:using, Expr(:., :ScopedValues))) # using ScopedValues
 
-    for modul in Base.loaded_modules_array()
+    current_modules = Set(Base.loaded_modules_array())
+    for modul in current_modules
         @debug "Using $modul in Main.__ScopedStreamsTmp"
         Core.eval(Main.__ScopedStreamsTmp, Expr(:using, Expr(:., Symbol(modul)))) # using xxx
     end
@@ -71,89 +72,172 @@ function gen_scoped_stream_methods()
         tv, decls, file, line = Base.arg_decl_parts(m)
         func_name = decls[1][2]
 
-        where_IO_var = String[]  # like IOT in `where IOT<:IO`
-        where_expr = ""  # where T where V<:Type
-        m_sig = m.sig
-        while m_sig isa UnionAll 
-            if m_sig.var isa Base.TypeVar
+        where_IO_var = Dict{String,String}()  # like ("IOT" => "where IOT<:IO")
+        where_expr = ""  # where T where V<:Type, but without type belonging to IO 
+        sig = m.sig
+        while sig isa UnionAll 
+            if sig.var isa Base.TypeVar
                 # find T in `where T<:IO`
-                if m.sig.var.ub === IO
-                    push!(where_IO_var, string(m.sig.var.name))
-                    m_sig = m_sig.body
+                if sig.var.ub != Any && IO <: sig.var.ub  # skip Any, do not make things complicated
+                    where_IO_var[string(sig.var.name)] = "where $(sig.var) "
+                    sig = sig.body
                     continue  # do not add where
                 end
             end
-            where_expr *= "where $(m_sig.var) "
-            m_sig = m_sig.body
+            where_expr *= "where $(sig.var) "
+            sig = sig.body
         end
 
-        left = string(modul_str, ".", func_name, "(")
-        right = left
-        for (i,d) in enumerate(@view decls[2:end])
-            @inbounds if d[1] == ""
-                d = ("__var_$i", d[2])
-            end
-            @inbounds if !isempty(d[2])
-                if IO_in_type_str(d[2], where_IO_var)
-                    left  = string(left , d[1], io_ref_type_str)
-                    right = string(right, deref_pref_str, d[1], ")")
+        #= Considering methods with multiple IO type,
+            like `write(to::IO, from::IO)`, or
+                 `fullios(x::IO, y::IO, z::IOT, u::IOT, v::IOK, w::T) where IOT <: IO where IOK <: Union{IO, Nothing} where T = println(x,y,z,u,v,w)`
+        For the first example, we need to generate methods of: 
+            write(::ScopedStream, ::IO)
+            write(::IO, ::ScopedStream)
+            write(::ScopedStream, ::ScopedStream)
+        =#
+        decls_2end = @view decls[2:end]
+        idx_alters_and_missing_where = decls_multiple_io(decls_2end, where_IO_var)
+        
+        for (idx_alter, missing_where) in idx_alters_and_missing_where
+            # @show idx_alter, missing_where
+            left = string(modul_str, ".", func_name, "(")
+            right = left
+            for (i,d) in enumerate(decls_2end)
+                @inbounds if d[1] == ""
+                    d = ("__var_$i", d[2])
+                end
+                @inbounds if !isempty(d[2])
+                    if i in idx_alter
+                        left  = string(left , d[1], io_ref_type_str)
+                        right = string(right, deref_pref_str, d[1], ")")
+                    else
+                        left = string(left, d[1], "::", d[2])
+                        right = string(right, d[1])
+                    end
                 else
-                    left = string(left, d[1], "::", d[2])
+                    left = string(left, d[1])
                     right = string(right, d[1])
                 end
-            else
-                left = string(left, d[1])
-                right = string(right, d[1])
+                if i < length(decls) - 1
+                    left  *= ", "
+                    right *= ", "
+                end
             end
-            if i < length(decls) - 1
-                left  *= ", "
-                right *= ", "
+
+            kwargs = Base.kwarg_decl(m)  # Vector{Symbol}, eg: [], [:keep], [Symbol("kw...")]
+            if !isempty(kwargs)
+                left  *= "; __kw..."
+                right *= "; __kw..."
             end
-        end
 
-        kwargs = Base.kwarg_decl(m)  # Vector{Symbol}, eg: [], [:keep], [Symbol("kw...")]
-        if !isempty(kwargs)
-            left  *= "; __kw..."
-            right *= "; __kw..."
-        end
+            left  *= ")"
+            right *= ")"
 
-        left  *= ")"
-        right *= ")"
+            str = "$left $where_expr $missing_where = $right"
+            @debug "[$x] $str"
 
-        str = "$left $where_expr = $right"
-        @debug "[$x] $str"
-
-        try
-            Core.eval(Main.__ScopedStreamsTmp, Meta.parse(str))
-        catch e
-            @error e
-            push!(failed_ids, x)
-            push!(failed_strs, str)
+            try
+                Core.eval(Main.__ScopedStreamsTmp, Meta.parse(str))
+            catch e
+                @error e
+                push!(failed_methods, x)
+                push!(failed_strs, str)
+            end
         end
     end
 
-    failed_ids, failed_strs
+    failed_methods, failed_strs
 end
 
-"""
-    IO_in_type_str(s::String, where_IO_var::Vector{String})
+# """
+#     IO_in_type_str(s::String, where_IO_var::Vector{String})
 
-Check whether `s` contains IO type.
+# Check whether `s` contains IO type.
 
-s is result of `string(t::Type)`. 
-"""
-function IO_in_type_str(s::String, where_IO_var::Vector{String})
-    s == "IO" && (return true)
-    s in where_IO_var && (return true)
+# s is result of `string(t::Type)`. 
+# """
+# function IO_in_type_str(s::String, where_IO_var::Dict{String, String})
+#     s == "IO" && (return true)
+#     s in where_IO_var && (return true)
+#     for w in where_IO_var
+#         s == w.first && (return true)
+#     end
     
-    # "Union{RawFD, Base.FileRedirect, IO}"
-    if startswith(s, "Union{")
-        for var in eachsplit(@view(s[7:end-1]), r", +")
-            var == "IO" && (return true)
-            var in where_IO_var && (return true)
+#     # "Union{RawFD, Base.FileRedirect, IO}"
+#     if startswith(s, "Union{")
+#         for var in eachsplit(@view(s[7:end-1]), r", +")
+#             var == "IO" && (return true)
+#             for w in where_IO_var
+#                 var == w.first && (return true)
+#             end
+#         end
+#     end
+#     return false
+# end
+
+function decls_multiple_io(decls, where_IO_var::Dict{String, String})
+
+    index_IOs = Vector{Int}[]  # Same idx of decls == T<:IO belongs to one Int[], each IO belongs to a seperate Int[]
+    where_IO_inds = Dict{String, Vector{Int}}(k=>Int[] for k in keys(where_IO_var))
+    for (i,decl) in enumerate(decls)
+        t = decl[2]  # type in string
+        if t == "IO"
+            push!(index_IOs, [i])
+        else
+            inds = get(where_IO_inds, t, nothing)
+            inds === nothing && continue
+            push!(inds, i)
         end
     end
-    return false
+    isempty(where_IO_inds) || for v in values(where_IO_inds)
+        push!(index_IOs, v)
+    end
+
+
+    # if length(index_IOs) <= 1
+    #     return index_IOs
+    # end
+
+    index_IOs_represent = [x for x in 1:length(index_IOs)]
+
+    id_alters = Vector{Int64}[]
+    for i in index_IOs_represent
+        push!(id_alters, [i])
+    end
+    i = 2
+    N = length(index_IOs_represent)
+    n_start = 1
+    while i <= N
+        n_end = length(id_alters)
+        for j in n_start:n_end
+            base = id_alters[j]
+            for k in base[end]+1:N
+                new = deepcopy(base)
+                push!(new, index_IOs_represent[k])
+                push!(id_alters, new)
+            end
+        end
+        n_start = n_end
+        i += 1
+    end
+    id_alters
+
+    idx_alters_and_missing_where = Pair{Vector{Int}, String}[]
+    for id_reps in id_alters
+        inx_alter = Int[]
+        missing_where = ""
+        for id_rep in id_reps
+            append!(inx_alter, index_IOs[id_rep])
+        end
+        for (t, t_ids) in where_IO_inds
+            if isempty(intersect(t_ids, inx_alter))
+                missing_where *= where_IO_var[t]
+            end
+        end
+        push!(idx_alters_and_missing_where, inx_alter=>missing_where)
+    end
+    idx_alters_and_missing_where
 end
 
 ### extend IO
@@ -189,7 +273,7 @@ handle_finally(file::AbstractString, io) = close(io)
 handle_finally(file::AbstractLogger, io) = nothing
 
 ### main redirection
-# printstyled()
+
 """
     redirect_stream(f::Function, file; mode="a+")
     redirect_stream(f::Function, outfile, errfile; mode="a+")
@@ -223,7 +307,7 @@ function redirect_stream(f::Function, outfile, errfile, logfile; mode="a+")
     end
 
     try
-        @with Base.stdout=>out Base.stderr=>err begin
+        @with Base.stdout.ref=>out Base.stderr.ref=>err begin
             with_logger(f, log)
         end
     catch
