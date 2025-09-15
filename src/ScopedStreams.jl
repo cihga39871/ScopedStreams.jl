@@ -23,54 +23,69 @@ ScopedStream(io::IO) = ScopedStream(ScopedValue{IO}(io))
 filter_base_core!(ms) = filter!(m -> m !== Base && m!== Core, ms)
 
 modules(m::Module) = filter_base_core!(ccall(:jl_module_usings, Any, (Any,), m))
-module_parent(m::Module) = ccall(:jl_module_usings, Any, (Any,), m)
 
-function module_deps(modules_using::Dict{Module})
-    dep_mods = Dict{Module, Vector{Module}}()
-    for (parent, children) in modules_using
-        for child in children
-            if haskey(dep_mods, child)
-                push!(dep_mods[child], parent)
-            else
-                dep_mods[child] = [parent]
-            end
-        end
-    end
-    dep_mods
-end
+"""
+    module_trace() :: Vector{String}
 
-# Pkg.why()
-
+Get Vector of String representation of Mod and Mod.SubMod... that are explicitly used from Base, Stdlibs, and Main. Modules loaded by `import ...` are ignored.
+"""
 function module_trace()
     current_modules = Base.loaded_modules_array() # Vector{Module}
     modules_using = Dict(m => modules(m) for m in current_modules)
-    dep_modules = module_deps(modules_using)
 
-    traces = Dict{Module, String}()
-
-    essentials = (Base, Core, Main)
-    to_rm_dep_modules = Module[]
-    for (m, deps) in dep_modules
-        m in essentials && continue
-        
-        done_m = false
-        for essential in essentials
-            if essential in deps
-                traces[m] = "$essential.$m"
-                done_m = true
-                push!(to_rm_dep_modules, m)
-                break
-            end
-        end
-        for dep in deps
-            dep_trace = get(traces, dep, nothing)
-        end
-        done_m && continue
+    pop!(modules_using, Core)
+    
+    # mods: mod.mod.mod link to using it with order.
+    mods = String[]
+    
+    # add base modules to mods
+    mods_base = pop!(modules_using, Base)  # with order
+    for m in mods_base
+        push!(mods, string(m))
     end
-    for m in to_rm_dep_modules
-        delete!(dep_modules, m)
+    mod_dict = Dict{Module,String}(m=>string(m) for m in mods_base)
+
+    entries = Pair{Module, String}[]
+    # add stdlib to entries
+    for m in keys(modules_using)
+        m_id = Base.identify_package(string(m))
+        m_id === nothing && continue
+        if Base.is_stdlib(m_id)
+            push!(entries, m=>string(m))
+        end
     end
 
+    # add Main's directly using packages to entries
+    for m in pop!(modules_using, Main)
+        push!(entries, m=>string(m))
+    end
+
+    # add entries.submod.submod to mods
+    while !isempty(entries)
+        entry, entry_str = pop!(entries)
+        if haskey(mod_dict, entry)
+            continue  # module already loaded in mods
+        end
+        push!(mods, entry_str)
+        mod_dict[entry] = entry_str
+        new_entries = get(modules_using, entry, nothing)
+        if new_entries === nothing
+            continue
+        end
+        for m in new_entries
+            # push!(mods, "$entry.$new_entry")
+            # push!(mod_dict, new_entry)
+            push!(entries, m => "$(entry_str).$m")
+        end
+    end
+
+    for m in keys(mod_dict)
+        if haskey(modules_using, m)
+            pop!(modules_using, m)
+        end
+    end
+
+    mods
 end
 
 """
@@ -99,59 +114,43 @@ function gen_scoped_stream_methods()
 
     # create a new module to import all currently loaded modules, and generate ScopedStream methods there: keep other modules clean. 
     Core.eval(Main, Expr(:module, true, :__ScopedStreamsTmp, quote end)) # module __ScopedStreamsTmp end
-    Core.eval(Main.__ScopedStreamsTmp, Expr(:using, Expr(:., :ScopedValues))) # using ScopedValues
+    Core.eval(Main.__ScopedStreamsTmp, Expr(:using, Expr(:., :ScopedStreams))) # using ScopedStreams
 
-    current_modules = Base.loaded_modules_array() # Vector{Module}
-    modules_using = Dict(m => modules(m) for m in current_modules)
+    mods = module_trace()
 
-    # modules_parent = Dict(m => module_parent(m) for m in current_modules)
-
-    dep_modules = module_deps(modules_using)
-
-    Pkg.dependencies() # Dict{Base.UUID, Pkg.API.PackageInfo}
-
-    filter!(x-> x!==Base && x!==Core && x!==Main, current_modules)
-
-    for modul in current_modules
-        @debug "Using $modul in Main.__ScopedStreamsTmp"
-        Core.eval(Main.__ScopedStreamsTmp, :(try; using $modul; catch; end)) # using xxx
+    @debug "Loading modules in Main.__ScopedStreamsTmp:"
+    for m in mods
+        @debug "    using $m"
+        Core.eval(Main.__ScopedStreamsTmp, Meta.parse("using $m")) # using xxx
     end
+
+    where_IO_var = Dict{String,String}()  # like ("IOT" => "where IOT<:IO")
 
     for (x, m) in enumerate(ms)
         # Construct "$left $where_expr = $right" like:
         # Modul.func(io::ScopedStream, a::T, b; kw...) where T = Modul.func(deref(io), a, b; kw...)
 
         modul = m.module
+
+        if modul == @__MODULE__ # skip ScopedStreams self
+            continue
+        end
+
         modul_str = string(modul)
-        # skip module self
-        if modul == @__MODULE__
-            continue
-        end
-        # only apply to all modules that are currently imported into __ScopedStreamsTmp
-        if !isdefined(Main.__ScopedStreamsTmp, Symbol(modul)) && !startswith(modul_str, "Base.")
-            @debug "Skip module: $modul"
-            continue
-        end
+
+        # # only apply to all modules that are currently imported into __ScopedStreamsTmp
+        # if !isdefined(Main.__ScopedStreamsTmp, Symbol(modul)) && !startswith(modul_str, "Base.")
+        #     @debug "Skip module: $modul"
+        #     continue
+        # end
         tv, decls, file, line = Base.arg_decl_parts(m)
         func_name = decls[1][2]
 
-        where_IO_var = Dict{String,String}()  # like ("IOT" => "where IOT<:IO")
-        where_expr = ""  # where T where V<:Type, but without type belonging to IO 
-        sig = m.sig
-        while sig isa UnionAll 
-            if sig.var isa Base.TypeVar
-                # find T in `where T<:IO`
-                if sig.var.ub != Any && IO <: sig.var.ub  # skip Any, do not make things complicated
-                    where_IO_var[string(sig.var.name)] = "where $(sig.var) "
-                    sig = sig.body
-                    continue  # do not add where
-                end
-            end
-            where_expr *= "where $(sig.var) "
-            sig = sig.body
-        end
+        # where_IO_var = Dict{String,String}()  # like ("IOT" => "where IOT<:IO")
+        where_expr = get_where_exprs!(where_IO_var, m) # where T where V<:Type, but without type belonging to IO 
 
-        #= Considering methods with multiple IO type,
+        #= ## Multiple IO arguments ## 
+        Considering methods with multiple IO type,
             like `write(to::IO, from::IO)`, or
                  `fullios(x::IO, y::IO, z::IOT, u::IOT, v::IOK, w::T) where IOT <: IO where IOK <: Union{IO, Nothing} where T = println(x,y,z,u,v,w)`
         For the first example, we need to generate methods of: 
@@ -198,12 +197,12 @@ function gen_scoped_stream_methods()
             right *= ")"
 
             str = "$left $where_expr $missing_where = $right"
-            @debug "[$x] $str"
+            # @debug "[$x] $str"
 
             try
                 Core.eval(Main.__ScopedStreamsTmp, Meta.parse(str))
             catch e
-                @error e
+                @debug e
                 push!(failed_methods, x)
                 push!(failed_strs, str)
             end
@@ -211,6 +210,25 @@ function gen_scoped_stream_methods()
     end
 
     failed_methods, failed_strs
+end
+
+function get_where_exprs!(where_IO_var::Dict{String,String}, m::Method)
+    empty!(where_IO_var)
+    where_expr = ""  # where T where V<:Type, but without type belonging to IO 
+    sig = m.sig
+    while sig isa UnionAll 
+        if sig.var isa Base.TypeVar
+            # find T in `where T<:IO`
+            if sig.var.ub != Any && IO <: sig.var.ub  # skip Any, do not make things complicated
+                where_IO_var[string(sig.var.name)] = "where $(sig.var) "
+                sig = sig.body
+                continue  # do not add where
+            end
+        end
+        where_expr *= "where $(sig.var) "
+        sig = sig.body
+    end
+    where_expr
 end
 
 function decls_multiple_io(decls, where_IO_var::Dict{String, String})
@@ -231,10 +249,9 @@ function decls_multiple_io(decls, where_IO_var::Dict{String, String})
         push!(index_IOs, v)
     end
 
-
-    # if length(index_IOs) <= 1
-    #     return index_IOs
-    # end
+    if length(index_IOs) <= 1
+        return [index_IOs => ""]
+    end
 
     index_IOs_represent = [x for x in 1:length(index_IOs)]
 
@@ -362,16 +379,6 @@ redirect_stream(f::Function, outfile, errfile; mode="a+") = redirect_stream(f::F
 redirect_stream(f::Function, outfile; mode="a+") = redirect_stream(f::Function, outfile, outfile, outfile; mode=mode)
 
 function __init__()
-end
-
-"""
-    ScopedStreams.init()
-
-Initializing ScopedStreams: Enable scope-dependent Base.stdout and Base.stderr, allowing each task to have its own isolated standard output and error streams.
-
-You have to call `ScopedStreams.init()` before using `redirect_stream(...)`
-"""
-function init()
     global stdout_origin
     global stderr_origin
 
@@ -402,7 +409,16 @@ function init()
         end
         stderr_origin = deref(Base.stderr)
     end
-    
+end
+
+"""
+    ScopedStreams.init()
+
+Initializing ScopedStreams: Enable scope-dependent Base.stdout and Base.stderr, allowing each task to have its own isolated standard output and error streams.
+
+You have to call `ScopedStreams.init()` before using `redirect_stream(...)`
+"""
+function init()
     gen_scoped_stream_methods()
 
     Base._redirect_io_global(ScopedStream(Base.stdout), 1)
