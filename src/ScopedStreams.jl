@@ -329,11 +329,11 @@ handle_finally(file::AbstractLogger, io) = nothing
 ### main redirection
 
 """
-    redirect_stream(f::Function, file; mode="a+")
-    redirect_stream(f::Function, outfile, errfile; mode="a+")
-    redirect_stream(f::Function, outfile, errfile, logfile; mode="a+")
+    redirect_stream(f::Function, out; mode="a+")
+    redirect_stream(f::Function, out, err; mode="a+")
+    redirect_stream(f::Function, out, err, log; mode="a+")
 
-Redirect outputs of function `f` to streams/file(s).
+Thread-safe: redirect outputs of function `f` to streams/file(s). 
 
 !!! info "Manual Initialization Needed"
     You have to call `ScopedStreams.init()` before using `redirect_stream(...)`
