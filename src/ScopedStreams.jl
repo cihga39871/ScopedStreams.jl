@@ -10,6 +10,8 @@ export ScopedStream, deref, gen_scoped_stream_methods, redirect_stream
 stdout_origin = nothing  # re-defined in __init__()
 stderr_origin = nothing  # re-defined in __init__()
 
+init_lock = ReentrantLock()
+
 mutable struct ScopedStream <: IO
     ref::ScopedValue{IO}
 end
@@ -131,12 +133,9 @@ function gen_scoped_stream_methods()
         # Modul.func(io::ScopedStream, a::T, b; kw...) where T = Modul.func(deref(io), a, b; kw...)
 
         modul = m.module
-
-        if modul == @__MODULE__ # skip ScopedStreams self
-            continue
-        end
-
         modul_str = string(modul)
+        modul_str == "ScopedStreams" && continue
+        endswith(modul_str, ".ScopedStreams") && continue # skip ScopedStreams self
 
         # # only apply to all modules that are currently imported into __ScopedStreamsTmp
         # if !isdefined(Main.__ScopedStreamsTmp, Symbol(modul)) && !startswith(modul_str, "Base.")
@@ -144,10 +143,11 @@ function gen_scoped_stream_methods()
         #     continue
         # end
         tv, decls, file, line = Base.arg_decl_parts(m)
-        func_name = decls[1][2]
+        decls_has_ScopedStream(decls) && continue  # do not gen method for methods with type ScopedStream
 
         # where_IO_var = Dict{String,String}()  # like ("IOT" => "where IOT<:IO")
         where_expr = get_where_exprs!(where_IO_var, m) # where T where V<:Type, but without type belonging to IO 
+        where_expr === nothing  & continue  # do not gen method for methods with type ScopedStream
 
         #= ## Multiple IO arguments ## 
         Considering methods with multiple IO type,
@@ -159,8 +159,9 @@ function gen_scoped_stream_methods()
             write(::ScopedStream, ::ScopedStream)
         =#
         decls_2end = @view decls[2:end]
+
         idx_alters_and_missing_where = decls_multiple_io(decls_2end, where_IO_var)
-        
+        func_name = decls[1][2]
         for (idx_alter, missing_where) in idx_alters_and_missing_where
             # @show idx_alter, missing_where
             left = string(modul_str, ".", func_name, "(")
@@ -212,6 +213,15 @@ function gen_scoped_stream_methods()
     failed_methods, failed_strs
 end
 
+function decls_has_ScopedStream(decls::Vector{Tuple{String, String}})
+    for decl in decls
+        t = decl[2]
+        t == "ScopedStream" && (return true)
+        endswith(t, ".ScopedStream") && (return true)
+    end
+    return false
+end
+
 function get_where_exprs!(where_IO_var::Dict{String,String}, m::Method)
     empty!(where_IO_var)
     where_expr = ""  # where T where V<:Type, but without type belonging to IO 
@@ -219,6 +229,9 @@ function get_where_exprs!(where_IO_var::Dict{String,String}, m::Method)
     while sig isa UnionAll 
         if sig.var isa Base.TypeVar
             # find T in `where T<:IO`
+            if sig.var.ub == ScopedStream
+                return nothing  # do not gen method for methods with type ScopedStream
+            end
             if sig.var.ub != Any && IO <: sig.var.ub  # skip Any, do not make things complicated
                 where_IO_var[string(sig.var.name)] = "where $(sig.var) "
                 sig = sig.body
@@ -335,9 +348,6 @@ handle_finally(file::AbstractLogger, io) = nothing
 
 Thread-safe: redirect outputs of function `f` to streams/file(s). 
 
-!!! info "Manual Initialization Needed"
-    You have to call `ScopedStreams.init()` before using `redirect_stream(...)`
-
 - `file`, `outfile`, `errfile`: can be file path (`AbstractString`), stream (`IO`), or `nothing`. Nothing means no redirect.
 - `logfile`: besides the types supported by `file`, also support `AbstractLogger`.
 - `mode`: same as `open(..., mode)`. Only used when any file is `AbstractString`.
@@ -346,8 +356,13 @@ Caution: If `xxxfile` is an `IO` or `AbstractLogger`, it won't be closed. Please
 """
 function redirect_stream(f::Function, outfile, errfile, logfile; mode="a+")
 
-    @assert Base.stdout isa ScopedStream "redirect_stream(...) check failed: Base.stdout is changed or not initiated. Please run ScopedStreams.init()"
-    @assert Base.stderr isa ScopedStream "redirect_stream(...) check failed: Base.stdout is changed or not initiated. Please run ScopedStreams.init()"
+    if !(Base.stdout isa ScopedStream && Base.stderr isa ScopedStream)
+        lock(init_lock) do
+            if !(Base.stdout isa ScopedStream && Base.stderr isa ScopedStream)
+                init()
+            end
+        end
+    end
 
     out = handle_open(outfile, mode)
     err = errfile == outfile ? out : handle_open(errfile, mode)
@@ -377,6 +392,10 @@ end
 redirect_stream(f::Function, outfile, errfile; mode="a+") = redirect_stream(f::Function, outfile, errfile, errfile; mode=mode)
 
 redirect_stream(f::Function, outfile; mode="a+") = redirect_stream(f::Function, outfile, outfile, outfile; mode=mode)
+
+redirect_stream(f::Function, ::Nothing; mode) = f()
+redirect_stream(f::Function, ::Nothing, ::Nothing; mode) = f()
+redirect_stream(f::Function, ::Nothing, ::Nothing, ::Nothing; mode) = f()
 
 function __init__()
     global stdout_origin
