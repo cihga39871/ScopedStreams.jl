@@ -35,8 +35,9 @@ function public_modules(modul::Module; all::Bool=true, imported::Bool=false)
     ns = names(modul; all, imported)  # names returns modules defined by syntax `module XX ... end`, but do not return defined by `using XX`
 
     filter!(ns) do x
-        x === :__toplevel__ && (return false)
-        isdefined(modul, x) || (return false)
+        x === :__toplevel__       && (return false)
+        x === :__ScopedStreamsTmp && (return false)
+        isdefined(modul, x)       || (return false)
         var = Core.eval(modul, x)
         var isa Module && var != modul
     end
@@ -69,7 +70,7 @@ Recursively list all loaded modules (loaded by `using XX` or defined by `module 
 """
 function all_modules(modul::Module, modul_str::String=string(modul); stdlibs::Bool=true)
     mods = String[modul_str]
-    mod_dict = Dict{Module,String}(modul=> modul_str)
+    mod_dict = Dict{Module,String}(modul => modul_str)
 
     if stdlibs
         std_mods = loaded_stdlibs()
@@ -134,6 +135,9 @@ function gen_scoped_stream_methods()
     failed_strs = String[]
 
     mods = all_modules(Main)
+    filter!(mods) do m
+        !occursin("__ScopedStreamsTmp", m)  # in case calling this function again
+    end
     scoped_streams_str = locate_ScopedStreams(mods)
     scoped_streams_str === nothing && error("Bug: cannot locate where is ScopedStreams loaded.")
 
@@ -152,6 +156,7 @@ function gen_scoped_stream_methods()
     where_IO_var = Dict{String,String}()  # like ("IOT" => "where IOT<:IO")
 
     for (x, m) in enumerate(ms)
+        
         # Construct "$left $where_expr = $right" like:
         # Modul.func(io::ScopedStream, a::T, b; kw...) where T = Modul.func(deref(io), a, b; kw...)
 
@@ -170,7 +175,7 @@ function gen_scoped_stream_methods()
 
         # where_IO_var = Dict{String,String}()  # like ("IOT" => "where IOT<:IO")
         where_expr = get_where_exprs!(where_IO_var, m) # where T where V<:Type, but without type belonging to IO 
-        where_expr === nothing  & continue  # do not gen method for methods with type ScopedStream
+        where_expr === nothing && continue  # do not gen method for methods with type ScopedStream
 
         #= ## Multiple IO arguments ## 
         Considering methods with multiple IO type,
@@ -221,9 +226,9 @@ function gen_scoped_stream_methods()
             right *= ")"
 
             str = "$left $where_expr $missing_where = $right"
-            # @debug "[$x] $str"
-
+            
             try
+                @debug "[$x]\t$str"
                 Core.eval(Main.__ScopedStreamsTmp, Meta.parse(str))
             catch e
                 @debug e
@@ -285,33 +290,13 @@ function decls_multiple_io(decls, where_IO_var::Dict{String, String})
         push!(index_IOs, v)
     end
 
-    if length(index_IOs) <= 1
-        return [index_IOs => ""]
+    if length(index_IOs) == 1
+        return [index_IOs[1] => ""]
+    elseif length(index_IOs) == 0
+        return Vector{Pair{Vector{Int64}, String}}()
     end
 
-    index_IOs_represent = [x for x in 1:length(index_IOs)]
-
-    id_alters = Vector{Int64}[]
-    for i in index_IOs_represent
-        push!(id_alters, [i])
-    end
-    i = 2
-    N = length(index_IOs_represent)
-    n_start = 1
-    while i <= N
-        n_end = length(id_alters)
-        for j in n_start:n_end
-            base = id_alters[j]
-            for k in base[end]+1:N
-                new = deepcopy(base)
-                push!(new, index_IOs_represent[k])
-                push!(id_alters, new)
-            end
-        end
-        n_start = n_end
-        i += 1
-    end
-    id_alters
+    id_alters = compute_id_alters(length(index_IOs))
 
     idx_alters_and_missing_where = Pair{Vector{Int}, String}[]
     for id_reps in id_alters
@@ -328,6 +313,32 @@ function decls_multiple_io(decls, where_IO_var::Dict{String, String})
         push!(idx_alters_and_missing_where, inx_alter=>missing_where)
     end
     idx_alters_and_missing_where
+end
+
+const ID_ALTERS_COMPUTED = Dict{Int, Vector{Vector{Int64}}}()
+function compute_id_alters(N::Int)
+    res = get(ID_ALTERS_COMPUTED, N, nothing)
+    res !== nothing && (return res)
+
+    id_alters = Vector{Int64}[[i] for i in 1:N]
+
+    i = 2
+    n_start = 1
+    while i <= N
+        n_end = length(id_alters)
+        for j in n_start:n_end
+            base = id_alters[j]
+            for k in base[end]+1:N
+                @show k
+                new = deepcopy(base)
+                push!(new, k)
+                push!(id_alters, new)
+            end
+        end
+        n_start = n_end
+        i += 1
+    end
+    ID_ALTERS_COMPUTED[N] = id_alters
 end
 
 ### extend IO
