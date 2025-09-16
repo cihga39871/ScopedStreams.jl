@@ -24,70 +24,92 @@ ScopedStream(io::IO) = ScopedStream(ScopedValue{IO}(io))
 
 filter_base_core!(ms) = filter!(m -> m !== Base && m!== Core, ms)
 
+"""
+    modules(m::Module)
+
+Show modules that are used by syntax `using XXX`. Caution: self defined modules and imported modules are not shown. 
+"""
 modules(m::Module) = filter_base_core!(ccall(:jl_module_usings, Any, (Any,), m))
 
-"""
-    module_trace() :: Vector{String}
+function public_modules(modul::Module; all::Bool=true, imported::Bool=false)
+    ns = names(modul; all, imported)  # names returns modules defined by syntax `module XX ... end`, but do not return defined by `using XX`
 
-Get Vector of String representation of Mod and Mod.SubMod... that are explicitly used from Base, Stdlibs, and Main. Modules loaded by `import ...` are ignored.
-"""
-function module_trace()
+    filter!(ns) do x
+        x === :__toplevel__ && (return false)
+        isdefined(modul, x) || (return false)
+        var = Core.eval(modul, x)
+        var isa Module && var != modul
+    end
+
+    mods_by_using = modules(modul)
+    for x in mods_by_using
+        push!(ns, Symbol(x))
+    end
+    ns
+end
+
+function loaded_stdlibs()
     current_modules = Base.loaded_modules_array() # Vector{Module}
-    modules_using = Dict(m => modules(m) for m in current_modules)
+    stdlibs = Set(readdir(Sys.STDLIB))
 
-    pop!(modules_using, Core)
-    
-    # mods: mod.mod.mod link to using it with order.
-    mods = String[]
-    
-    # add base modules to mods
-    mods_base = pop!(modules_using, Base)  # with order
-    for m in mods_base
-        push!(mods, string(m))
+    filter!(current_modules) do x
+        string(x) in stdlibs
     end
-    mod_dict = Dict{Module,String}(m=>string(m) for m in mods_base)
+    current_modules
+end
 
-    entries = Pair{Module, String}[]
-    # add stdlib to entries
-    for m in keys(modules_using)
-        m_id = Base.identify_package(string(m))
-        m_id === nothing && continue
-        if Base.is_stdlib(m_id)
-            push!(entries, m=>string(m))
+"""
+    all_modules(modul::Module, modul_str::String=string(modul); stdlibs::Bool=true) :: Vector{String}
+
+Recursively list all loaded modules (loaded by `using XX` or defined by `module ... end`).
+
+- `modul_str`: the string representation of `modul`.
+- `stdlibs::Bool=true`: including currently loaded standard libraries.
+
+"""
+function all_modules(modul::Module, modul_str::String=string(modul); stdlibs::Bool=true)
+    mods = String[modul_str]
+    mod_dict = Dict{Module,String}(modul=> modul_str)
+
+    if stdlibs
+        std_mods = loaded_stdlibs()
+        for m in std_mods
+            m_str = string(m)
+            push!(mods, m_str)
+            mod_dict[m] = m_str
         end
     end
 
-    # add Main's directly using packages to entries
-    for m in pop!(modules_using, Main)
-        push!(entries, m=>string(m))
+    all_modules!(mods, mod_dict, modul, modul_str)
+    mods
+end
+function all_modules!(mods::Vector{String}, mod_dict::Dict{Module,String}, modul::Module, modul_str::String)
+    if modul == Base
+        modul_str = "Base"
+    elseif modul == Core
+        modul_str = "Core"
     end
-
-    # add entries.submod.submod to mods
-    while !isempty(entries)
-        entry, entry_str = pop!(entries)
-        if haskey(mod_dict, entry)
-            continue  # module already loaded in mods
-        end
-        push!(mods, entry_str)
-        mod_dict[entry] = entry_str
-        new_entries = get(modules_using, entry, nothing)
-        if new_entries === nothing
+    ns = public_modules(modul)
+    for x in ns
+        isdefined(modul, x) || continue
+        var = Core.eval(modul, x)  # modul.x :: Module
+        if haskey(mod_dict, var)
             continue
         end
-        for m in new_entries
-            # push!(mods, "$entry.$new_entry")
-            # push!(mod_dict, new_entry)
-            push!(entries, m => "$(entry_str).$m")
+        this_str = "$modul_str.$x"
+        push!(mods, this_str)
+        mod_dict[var] = this_str
+        all_modules!(mods, mod_dict, var, this_str)
+    end
+end
+
+function locate_ScopedStreams(mods::Vector{String})
+    for m in mods
+        if m == "ScopedStreams" || endswith(m, ".ScopedStreams")
+            return m
         end
     end
-
-    for m in keys(mod_dict)
-        if haskey(modules_using, m)
-            pop!(modules_using, m)
-        end
-    end
-
-    mods
+    return nothing
 end
 
 """
@@ -111,14 +133,15 @@ function gen_scoped_stream_methods()
     failed_methods = Method[]
     failed_strs = String[]
 
-    io_ref_type_str = string("::", @__MODULE__, ".ScopedStream")
-    deref_pref_str = string(@__MODULE__, ".deref(")
+    mods = all_modules(Main)
+    scoped_streams_str = locate_ScopedStreams(mods)
+    scoped_streams_str === nothing && error("Bug: cannot locate where is ScopedStreams loaded.")
+
+    io_ref_type_str = string("::", scoped_streams_str, ".ScopedStream")
+    deref_pref_str = string(scoped_streams_str, ".deref(")
 
     # create a new module to import all currently loaded modules, and generate ScopedStream methods there: keep other modules clean. 
     Core.eval(Main, Expr(:module, true, :__ScopedStreamsTmp, quote end)) # module __ScopedStreamsTmp end
-    Core.eval(Main.__ScopedStreamsTmp, Expr(:using, Expr(:., :ScopedStreams))) # using ScopedStreams
-
-    mods = module_trace()
 
     @debug "Loading modules in Main.__ScopedStreamsTmp:"
     for m in mods
