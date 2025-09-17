@@ -70,7 +70,7 @@ iof = tempname()
 function f(prepend::String, repeat_time::Int)
     for _ in 1:repeat_time
         println(stdout, "stdout: ", prepend, ": ", now())
-        println(stderr, "stdout: ", prepend, ": ", now())
+        println(stderr, "stderr: ", prepend, ": ", now())
         @info    string("stdlog: ", prepend, ": ", now())
         sleep(1)
     end
@@ -89,26 +89,26 @@ wait(t1) ; wait(t2)
 b_res = split(String(take!(iob)), "\n")
 # 13-element Vector{SubString{String}}:
 #  "stdout: iob: 2025-09-17T11:06:50.866"
-#  "stdout: iob: 2025-09-17T11:06:50.947"
+#  "stderr: iob: 2025-09-17T11:06:50.947"
 #  "┌ Info: stdlog: iob: 2025-09-17T11:06:50.954"
 #  "└ @ Main REPL[4]:5"
 #  "stdout: iob: 2025-09-17T11:06:52.024"
-#  "stdout: iob: 2025-09-17T11:06:52.024"
+#  "stderr: iob: 2025-09-17T11:06:52.024"
 #  "┌ Info: stdlog: iob: 2025-09-17T11:06:52.024"
 #  "└ @ Main REPL[4]:5"
 #  "stdout: iob: 2025-09-17T11:06:53.027"
-#  "stdout: iob: 2025-09-17T11:06:53.027"
+#  "stderr: iob: 2025-09-17T11:06:53.027"
 #  "┌ Info: stdlog: iob: 2025-09-17T11:06:53.027"
 #  "└ @ Main REPL[4]:5"
 
 f_res = readlines(iof)
 # 8-element Vector{String}:
 #  "stdout: iof: 2025-09-17T11:06:51.052"
-#  "stdout: iof: 2025-09-17T11:06:51.063"
+#  "stderr: iof: 2025-09-17T11:06:51.063"
 #  "┌ Info: stdlog: iof: 2025-09-17T11:06:51.063"
 #  "└ @ Main REPL[4]:5"
 #  "stdout: iof: 2025-09-17T11:06:52.072"
-#  "stdout: iof: 2025-09-17T11:06:52.072"
+#  "stderr: iof: 2025-09-17T11:06:52.072"
 #  "┌ Info: stdlog: iof: 2025-09-17T11:06:52.072"
 #  "└ @ Main REPL[4]:5"
 
