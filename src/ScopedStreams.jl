@@ -135,9 +135,7 @@ function gen_scoped_stream_methods()
     failed_strs = String[]
 
     mods = all_modules(Main)
-    filter!(mods) do m
-        !occursin("__ScopedStreamsTmp", m)  # in case calling this function again
-    end
+
     scoped_streams_str = locate_ScopedStreams(mods)
     scoped_streams_str === nothing && error("Bug: cannot locate where is ScopedStreams loaded.")
 
@@ -149,8 +147,8 @@ function gen_scoped_stream_methods()
 
     @debug "Loading modules in Main.__ScopedStreamsTmp:"
     for m in mods
-        @debug "    using $m"
-        Core.eval(Main.__ScopedStreamsTmp, Meta.parse("using $m")) # using xxx
+        @debug "    Try using $m"
+        Core.eval(Main.__ScopedStreamsTmp, Meta.parse("try; using $m; catch; end")) # using xxx
     end
 
     where_IO_var = Dict{String,String}()  # like ("IOT" => "where IOT<:IO")
@@ -166,10 +164,10 @@ function gen_scoped_stream_methods()
         endswith(modul_str, ".ScopedStreams") && continue # skip ScopedStreams self
 
         # # only apply to all modules that are currently imported into __ScopedStreamsTmp
-        # if !isdefined(Main.__ScopedStreamsTmp, Symbol(modul)) && !startswith(modul_str, "Base.")
-        #     @debug "Skip module: $modul"
-        #     continue
-        # end
+        if !isdefined(Main.__ScopedStreamsTmp, Symbol(modul)) && !startswith(modul_str, "Base.")
+            @debug "Skip module: $modul"
+            continue
+        end
         tv, decls, file, line = Base.arg_decl_parts(m)
         decls_has_ScopedStream(decls) && continue  # do not gen method for methods with type ScopedStream
 
@@ -382,11 +380,13 @@ handle_finally(file::AbstractLogger, io) = nothing
 
 Thread-safe: redirect outputs of function `f` to streams/file(s). 
 
-- `file`, `outfile`, `errfile`: can be file path (`AbstractString`), stream (`IO`), or `nothing`. Nothing means no redirect.
-- `logfile`: besides the types supported by `file`, also support `AbstractLogger`.
-- `mode`: same as `open(..., mode)`. Only used when any file is `AbstractString`.
+- `out`, `err`: can be file path (`AbstractString`), stream (`IO`), or `nothing`. Nothing means no redirect.
+- `log`: besides the types supported by `out`, also support `AbstractLogger`.
+- `mode`: same as `open(..., mode)`. Only used for `AbstractString` positional arguments.
 
 Caution: If `xxxfile` is an `IO` or `AbstractLogger`, it won't be closed. Please use `close(io)` or `JobSchedulers.close_in_future(io, jobs)` manually.
+
+If `Base.stdout` and `Base.stderr` are not `ScopedStream`, the function will call `ScopedStreams.init()` to initialize them.
 """
 function redirect_stream(f::Function, outfile, errfile, logfile; mode="a+")
 
@@ -469,7 +469,6 @@ end
 
 Initializing ScopedStreams: Enable scope-dependent Base.stdout and Base.stderr, allowing each task to have its own isolated standard output and error streams.
 
-You have to call `ScopedStreams.init()` before using `redirect_stream(...)`
 """
 function init()
     gen_scoped_stream_methods()
@@ -481,7 +480,7 @@ end
 """
     restore_stream()
 
-Reset Base.stdout and Base.stderr to the original stream that captured at `ScopedStreams.init()`.
+Reset `Base.stdout` and `Base.stderr` to the original streams at the time loading the package.
 """
 function restore_stream()
     global stdout_origin
