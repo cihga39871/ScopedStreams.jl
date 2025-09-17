@@ -6,7 +6,6 @@ import InteractiveUtils: methodswith
 
 export ScopedStream, deref, redirect_stream, gen_scoped_stream_methods, restore_stream
 
-
 ########### Globals ###########
 
 stdout_origin = nothing  # re-defined in __init__()
@@ -172,7 +171,7 @@ function redirect_stream(f::Function, outfile, errfile, logfile; mode="a+")
 
     try
         @with Base.stdout.ref=>out Base.stderr.ref=>err begin
-            with_logger(f, log)
+            this_with_logger(f, log)
         end
     catch
         rethrow()
@@ -209,10 +208,21 @@ handle_open_log(file::AbstractString, mode) = open(file::AbstractString, mode)
 
 handle_open_log(logger::AbstractLogger, mode) = logger
 
-Logging.with_logger(f::Function, logger::Nothing) = f()
-function Logging.with_logger(f::Function, io::IO)
-    logger = SimpleLogger(io)
-    Logging.with_logger(f, logger)
+@static if isdefined(ScopedValues, :with_logger)
+    # before v1.11, ScopedValues.with_logger used to replace Logging.with_logger
+    ScopedValues.with_logger(f::Function, logger::Nothing) = f()
+    function ScopedValues.with_logger(f::Function, io::IO)
+        logger = SimpleLogger(io)
+        ScopedValues.with_logger(f, logger)
+    end
+    const this_with_logger = ScopedValues.with_logger
+else
+    Logging.with_logger(f::Function, logger::Nothing) = f()
+    function Logging.with_logger(f::Function, io::IO)
+        logger = SimpleLogger(io)
+        Logging.with_logger(f, logger)
+    end
+    const this_with_logger = Logging.with_logger
 end
 
 handle_finally(file::Nothing, io) = nothing
