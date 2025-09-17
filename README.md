@@ -1,25 +1,43 @@
 # ScopedStreams.jl
-Enable scope-dependent stdout and stderr in Julia, allowing each task to have its own isolated standard output and error streams.
+Enable scope-dependent stdout and stderr in Julia, allowing each multi-threaded task to have its own isolated standard output and error streams. 
 
 ## Usage
 
 ### Initialization
 
-`ScopedStreams.init()` needs to be manually called.
-
-The function will
-
-1. generate new methods for `ScopedStream` based on the currently-defined methods with `IO`, and
-2. enable scope-dependent `Base.stdout` and `Base.stderr`.
+`ScopedStreams.init()` needs to be manually called after loading all packages and before redirecting streams:
 
 ```julia
 using ScopedStreams
 ScopedStreams.init()
 ```
 
-### Thread-safe `redirect_stream`
+The function will
 
-#### Defination
+1. Generate new methods for `ScopedStream` based on the currently-defined methods with `IO`. Eg:
+   ```julia
+    julia> methodswith(ScopedStream)[1:5]
+    [1] IOContext(io::ScopedStream, context::ScopedStream) @ Main.__ScopedStreamsTmp none:1
+    [2] IOContext(io::ScopedStream) @ Main.__ScopedStreamsTmp none:1
+    [3] IOContext(io::ScopedStream, dict::Base.ImmutableDict{Symbol, Any}) @ Main.__ScopedStreamsTmp none:1
+    [4] IOContext(io::ScopedStream, context::IO) @ Main.__ScopedStreamsTmp none:1
+    [5] IOContext(io::IO, context::ScopedStream) @ Main.__ScopedStreamsTmp none:1
+   ```
+   
+2. Enable scope-dependent `Base.stdout` and `Base.stderr`. Eg:
+
+   ```julia
+    julia> stdout
+    ScopedStream(Base.ScopedValues.ScopedValue{IO}(Base.TTY(RawFD(17) open, 0 bytes waiting)))
+
+    julia> stderr
+    ScopedStream(Base.ScopedValues.ScopedValue{IO}(Base.TTY(RawFD(19) open, 0 bytes waiting)))
+   ```
+
+
+### Main function to redirect stdout, stderr, and logger
+
+`redirect_stream` is the main function of the package. It allows each multi-threaded task to have its own isolated standard output and error streams. 
 
 ```julia
 redirect_stream(f::Function, out; mode="a+")
@@ -134,7 +152,7 @@ To troubleshoot this error, please check the following:
 ### 2. This package is not compatible with `julia -E 'expr'`. Eg:
 
 ```bash
-julia --project -E "using ScopedStreams; ScopedStreams.init(); 123"
+julia -E "using ScopedStreams; ScopedStreams.init(); 123"
 # 123ERROR: ScopedStream does not support byte I/O
 # Stacktrace:
 #   ...
@@ -143,14 +161,14 @@ julia --project -E "using ScopedStreams; ScopedStreams.init(); 123"
 To fix it, you can use `julia -e ...`, rather than `julia -E ...`:
 
 ```bash
-julia --project -e "using ScopedStreams; ScopedStreams.init(); println(123)" 
+julia -e "using ScopedStreams; ScopedStreams.init(); println(123)" 
 # 123
 ```
 
 Another way to fix it, you can restore stdout and stderr to the original streams manually before the last call:
 
 ```bash
-julia --project -E "using ScopedStreams; ScopedStreams.init(); restore_stream(); 123"
+julia -E "using ScopedStreams; ScopedStreams.init(); restore_stream(); 123"
 # 123
 ```
 
