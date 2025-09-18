@@ -1,5 +1,5 @@
 # ScopedStreams.jl
-Enable scope-dependent stdout and stderr in Julia, allowing each multi-threaded task to have its own isolated standard output and error streams. 
+Julia's built-in stdout and stderr are global, and modifying them conventionally is not thread-safe, posing challenges in multi-threaded applications. The ScopedStreams.jl package addresses this by enabling scope-dependent stdout and stderr, allowing each task to operate with isolated standard output and error streams. This ensures safe, concurrent I/O operations, enhancing reliability and performance in parallel computing tasks. Julia users should adopt ScopedStreams for robust, thread-safe stream management in multi-threaded environments.
 
 ## Usage
 
