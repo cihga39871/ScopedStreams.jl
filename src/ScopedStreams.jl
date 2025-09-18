@@ -62,7 +62,7 @@ Get the actual `IO` from `ScopedStream`, or return the input if it is not a `Sco
 - `mode`: same as `open(..., mode)`. Only used for `AbstractString` positional arguments.
 
 ### Prerequisite
-Call `ScopedStreams.init()` first to enable scope-dependent `Base.stdout` and `Base.stderr`, or the function will throw an error. If you define or import new methods for `IO` types, please call `gen_scoped_stream_methods()` first to refresh existing functions and include newly defined functions for IO.
+Call `ScopedStreams.init()` first to enable scope-dependent `Base.stdout` and `Base.stderr`. Otherwise, it will fall back to no redirection. If you define or import new methods for `IO` types, please call `gen_scoped_stream_methods()` first to refresh existing functions and include newly defined functions for IO.
 
 ### Tips
 - Do not mess up this function with Base methods `redirect_stdout`, `redirect_stderr`, and `redirect_stdio` because the Base methods are **not thread-safe**, and calling them will mess up `redirect_stream` redirection.
