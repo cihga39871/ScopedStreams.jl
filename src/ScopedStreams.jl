@@ -154,10 +154,6 @@ end
 """
 function redirect_stream(f::Function, outfile, errfile, logfile; mode="a+")
 
-    if !(Base.stdout isa ScopedStream && Base.stderr isa ScopedStream)
-        error("Please call ScopedStreams.init() first to enable scope-dependent Base.stdout and Base.stderr.")
-    end
-
     out = handle_open(outfile, mode)
     err = errfile == outfile ? out : handle_open(errfile, mode)
     log = logfile == outfile ? out : logfile == errfile ? err : handle_open_log(logfile, mode)
@@ -173,8 +169,13 @@ function redirect_stream(f::Function, outfile, errfile, logfile; mode="a+")
         @with Base.stdout.ref=>out Base.stderr.ref=>err begin
             this_with_logger(f, log)
         end
-    catch
-        rethrow()
+    catch ex
+        if typeof(ex) === ErrorException && endswith(ex.msg, "has no field ref")
+            @warn("Fallback to default stdout and stderr because they are not initialized for thread-safe redirection. \nTo fix it, please call `ScopedStreams.init()` first, and avoid using Base's `redirect_std***` functions.")
+            this_with_logger(f, log)
+        else
+            rethrow(ex)
+        end
     finally
         # close or flush or do nothing
         handle_finally(outfile, out)
@@ -187,9 +188,9 @@ redirect_stream(f::Function, outfile, errfile; mode="a+") = redirect_stream(f::F
 
 redirect_stream(f::Function, outfile; mode="a+") = redirect_stream(f::Function, outfile, outfile, outfile; mode=mode)
 
-redirect_stream(f::Function, ::Nothing; mode) = f()
-redirect_stream(f::Function, ::Nothing, ::Nothing; mode) = f()
-redirect_stream(f::Function, ::Nothing, ::Nothing, ::Nothing; mode) = f()
+redirect_stream(f::Function, ::Nothing; mode="a+") = f()
+redirect_stream(f::Function, ::Nothing, ::Nothing; mode="a+") = f()
+redirect_stream(f::Function, ::Nothing, ::Nothing, ::Nothing; mode="a+") = f()
 
 
 ### extend IO for redirect_stream
