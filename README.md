@@ -50,7 +50,7 @@ redirect_stream(f::Function, out, err, log; mode="a+")
 **Thread-safely** run function `f` with redirected `Base.stdout`, `Base.stderr`, and logger.
 
 - `out`, `err`: can be file path (`AbstractString`), stream (`IO`), or `nothing`. Nothing means no redirect.
-- `log`: besides the types supported by `out`, also support `AbstractLogger`.
+- `log`: besides the types supported by `out`, also supports `AbstractLogger`.
 - `mode`: same as `open(..., mode)`. Only used for `AbstractString` positional arguments.
 
 #### Tips
@@ -132,7 +132,7 @@ redirect_stream(io, io, io) do
 end
 ```
 
-However it is not supported to pass two/three distinct descriptors of the same file:
+However, it is not supported to pass two/three distinct descriptors of the same file:
 
 ```julia
 # NOT supported
@@ -143,12 +143,12 @@ end
 
 ## Troubleshooting and known issues
 
-### 1. When you see an IO related error
+### 1. When you see an IO-related warning or error
 
 To troubleshoot this error, please check the following:
 
 - Did you forget to call `ScopedStreams.init()` before using `redirect_stream`?
-- Did you define new functions related to `IO`, or using other modules after running `ScopedStreams.init()`? If so, please call `ScopedStreams.init()` or `gen_scoped_stream_methods()` to refresh existing and newly defined IO-related functions.
+- Did you define new functions related to `IO`, or use other modules after running `ScopedStreams.init()`? If so, please call `ScopedStreams.init()` or `gen_scoped_stream_methods()` to refresh existing and newly defined IO-related functions.
 - Did you or some packages use `redirect_stdout`, `redirect_stderr` or `redirect_stdio`? Please avoid using them because they are not compatible with the thread-safe `redirect_stream`.
 
 ### 2. This package is not compatible with `julia -E 'expr'`. Eg:
