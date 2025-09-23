@@ -40,10 +40,18 @@ using ScopedStreams
     @test Base.stderr isa ScopedStream
     @test ScopedStreams.handle_open(Base.stdout, "a+") === ScopedStreams.deref(Base.stdout)
 
-    
+    @test ScopedStream(Base.stdout) === Base.stdout
     
     iob = IOBuffer()
     iof = tempname()
+
+    @test ScopedStreams.handle_open_log(iob, "a+") === iob
+    @test ScopedStreams.handle_open_log(Base.stdout, "a+") === ScopedStreams.deref(Base.stdout)
+
+    io_of_file = ScopedStreams.handle_open_log(iof, "a+")
+    @test io_of_file isa IOStream
+    close(io_of_file)  # just test open and close
+
     try
         t1 = @task redirect_stream(iob) do
             f("iob", 3)
@@ -64,7 +72,7 @@ using ScopedStreams
 
         @test length(filter(x->occursin(r"std...: iob:", x), b_res)) == 9
         @test length(filter(x->occursin(r"iob/iof:", x), b_res)) == 1
-        
+
         @test length(filter(x->occursin(r"std...: iof:", x), f_res)) == 6
         @test length(filter(x->occursin(r"iob/iof:", x), f_res)) == 2
 

@@ -197,12 +197,12 @@ redirect_stream(f::Function, ::Nothing, ::Nothing, ::Nothing; mode="a+") = f()
 
 # Base.close(::Nothing) = nothing
 
-handle_open(::Nothing, mode) = nothing
+handle_open(::Nothing, mode) = nothing  # COV_EXCL_LINE
 handle_open(io::IO, mode) = io # do not change and do not close when exit
 handle_open(io::ScopedStream, mode) = deref(io)
 handle_open(file::AbstractString, mode) = open(file::AbstractString, mode)
 
-handle_open_log(::Nothing, mode) = nothing
+handle_open_log(::Nothing, mode) = nothing  # COV_EXCL_LINE
 handle_open_log(io::IO, mode) = io # do not change and do not close when exit
 handle_open_log(io::ScopedStream, mode) = deref(io)
 handle_open_log(file::AbstractString, mode) = open(file::AbstractString, mode)
@@ -228,10 +228,10 @@ else
     const this_with_logger = Logging.with_logger
 end
 
-handle_finally(file::Nothing, io) = nothing
+handle_finally(file::Nothing, io) = nothing  # COV_EXCL_LINE
 handle_finally(file::IO, io) = flush(io)
 handle_finally(file::AbstractString, io) = close(io)
-handle_finally(file::AbstractLogger, io) = nothing
+handle_finally(file::AbstractLogger, io) = nothing  # COV_EXCL_LINE
 
 """
     restore_stream()
@@ -257,11 +257,7 @@ function __init__()
 
     # save original stdxxx to stdxxx_origin
     if isnothing(stdout_origin)
-        if Base.stdout isa ScopedStream
-            nothing
-        elseif Base.stdout isa Base.TTY
-            nothing
-        elseif occursin(r"<fd .*>|RawFD\(\d+\)|WindowsRawSocket\(", string(Base.stdout))
+        if Base.stdout isa ScopedStream || Base.stdout isa Base.TTY || occursin(r"<fd .*>|RawFD\(\d+\)|WindowsRawSocket\(", string(Base.stdout))
             nothing
         else
             # Not Terminal (TTY), nor linux file redirection (fd)
@@ -270,11 +266,7 @@ function __init__()
         stdout_origin = deref(Base.stdout)
     end
     if isnothing(stderr_origin)
-        if Base.stdout isa ScopedStream
-            nothing
-        elseif Base.stderr isa Base.TTY
-           nothing
-        elseif occursin(r"<fd .*>|RawFD\(\d+\)|WindowsRawSocket\(", string(Base.stderr))
+        if Base.stdout isa ScopedStream || Base.stderr isa Base.TTY || occursin(r"<fd .*>|RawFD\(\d+\)|WindowsRawSocket\(", string(Base.stderr))
             nothing
         else
             # Not Terminal (TTY), nor linux file redirection (fd)
