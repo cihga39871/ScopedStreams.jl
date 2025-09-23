@@ -33,8 +33,8 @@ using ScopedStreams
 
     @test ScopedStreams.this_with_logger(()->123, nothing) == 123
 
-    ScopedStreams.init()
-    ScopedStreams.init()
+    ScopedStreams.init(false) # do not incremental, regenerate all methods for IO
+    ScopedStreams.init(true) # incremental, only generate methods for newly defined methods for IO
 
     @test Base.stdout isa ScopedStream
     @test Base.stderr isa ScopedStream

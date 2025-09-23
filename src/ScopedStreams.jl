@@ -18,7 +18,8 @@ push!(STDLIB_NAMES, "Base")
 push!(STDLIB_NAMES, "Core")
 
 const ID_ALTERS_COMPUTED = Dict{Int, Vector{Vector{Int64}}}()
-
+const IO_METHODS_GENERATED = Set{Method}()
+sizehint!(IO_METHODS_GENERATED, 1000)
 
 ########### ScopedStream ###########
 
@@ -254,7 +255,8 @@ end
 function __init__()
     global stdout_origin
     global stderr_origin
-
+    # create a new module to import all currently loaded modules, and generate ScopedStream methods there: keep other modules clean. 
+    Core.eval(Main, Expr(:module, true, :__ScopedStreamsTmp, quote end))
     # save original stdxxx to stdxxx_origin
     if isnothing(stdout_origin)
         if Base.stdout isa ScopedStream || Base.stdout isa Base.TTY || occursin(r"<fd .*>|RawFD\(\d+\)|WindowsRawSocket\(", string(Base.stdout))
@@ -277,15 +279,17 @@ function __init__()
 end
 
 """
-    ScopedStreams.init()
+    ScopedStreams.init(incremental::Bool=true)
 
 Initializing ScopedStreams: 
-- Generate methods for ScopedStream and 
-- Enable scope-dependent Base.stdout and Base.stderr, allowing each task to have its own isolated standard output and error streams.
+1. Generate methods for ScopedStream and 
+2. Enable scope-dependent Base.stdout and Base.stderr, allowing each task to have its own isolated standard output and error streams.
+
+- `incremental::Bool=true`: only generate methods for newly defined methods for `IO` since last call. If `false`, regenerate all methods for `IO`.
 """
-function init()
+function init(incremental::Bool=true)
     lock(INIT_LOCK) do
-        gen_scoped_stream_methods()
+        gen_scoped_stream_methods(incremental)
 
         if !(Base.stdout isa ScopedStream)
             Base._redirect_io_global(ScopedStream(Base.stdout), 1)
@@ -300,9 +304,13 @@ end
 ########### Reflection ###########
 
 """
-    gen_scoped_stream_methods()
+    gen_scoped_stream_methods(incremental::Bool=true)
 
-Generate methods for `ScopedStream` from existing methods with `IO` in all **currently** loaded modules. Eg:
+Generate methods for `ScopedStream` from existing methods with `IO` in all **currently** loaded modules. 
+
+- `incremental::Bool=true`: only generate methods for newly defined methods for `IO` since last call. If `false`, regenerate all methods for `IO`.
+
+## What will be generated?
 
 ```julia
 # The existing method of `IO` as an template
@@ -314,7 +322,7 @@ Base.write(io::ScopedStream, x::UInt8) = Base.write(deref(io), x)
 
 The function is called in `ScopedStreams.init()`. You can also manually run it to refresh existing functions and include newly defined functions.
 """
-function gen_scoped_stream_methods()
+function gen_scoped_stream_methods(incremental::Bool=true)
     # https://github.com/JuliaLang/julia/blob/v1.11.6/base/methodshow.jl#L80
 
     lock(INIT_LOCK) do
@@ -323,25 +331,16 @@ function gen_scoped_stream_methods()
         io_ref_type_str = "::ScopedStreams.ScopedStream"
         deref_pref_str = "ScopedStreams.deref("
 
-        # create a new module to import all currently loaded modules, and generate ScopedStream methods there: keep other modules clean. 
-        Core.eval(Main, Expr(:module, true, :__ScopedStreamsTmp, quote
-        # module __ScopedStreamsTmp 
-            function try_get_module(symbol::Symbol)
-                mod_list = Base.loaded_modules_array()
-                for m in mod_list
-                    if nameof(m) === symbol
-                        return m
-                    end
-                end
-                return nothing
-            end
+        Core.eval(getproperty(Main, :__ScopedStreamsTmp), quote
+            mod_list = Base.loaded_modules_array()
+            mod_dict = Dict{Symbol,Module}(nameof(m) => m for m in mod_list)
 
-            const ScopedStreams = try_get_module(:ScopedStreams)
+            const ScopedStreams = get(mod_dict, :ScopedStreams, nothing)
 
             if isnothing(ScopedStreams)
                 error("Bug: cannot locate where is ScopedStreams loaded. Please report an issue at https://github.com/cihga39871/ScopedStreams.jl")
             end 
-        end)) # module __ScopedStreamsTmp end
+        end)
 
         @debug "Loading modules in Main.__ScopedStreamsTmp:"
         for m in mods
@@ -350,19 +349,19 @@ function gen_scoped_stream_methods()
             end
             @debug "    Try using $m"
             if '.' in m  # m's dependency link is resolved, so can directly using it
-                Core.eval(Main.__ScopedStreamsTmp, Meta.parse("""
+                Core.eval(getproperty(Main, :__ScopedStreamsTmp), Meta.parse("""
                 try
                     using $m
                 catch
                     @debug("Skip $m: cannot using $m in Main.__ScopedStreamsTmp")
                 end""")) # using xxx
             else  # m's dependency link may not resolved, so we can use a backup loading strategy in catch.
-                Core.eval(Main.__ScopedStreamsTmp, Meta.parse("""
+                Core.eval(getproperty(Main, :__ScopedStreamsTmp), Meta.parse("""
                 try
                     using $m
                 catch
                     # const needs to be top level, so we need to expose mod to global and use eval.
-                    global mod = try_get_module(:$m)
+                    global mod = get(mod_dict, :$m, nothing)
                     if mod !== nothing
                         eval(Meta.parse("const $m = mod"))
                     else
@@ -384,7 +383,7 @@ function gen_scoped_stream_methods()
     end
 end
 
-function _gen_scoped_stream_method!(failed::Vector{Pair{Method, String}}, where_IO_var::Dict{String,String}, m::Method, x::Int, io_ref_type_str::String, deref_pref_str::String)
+function _gen_scoped_stream_method!(failed::Vector{Pair{Method, String}}, where_IO_var::Dict{String,String}, m::Method, x::Int, io_ref_type_str::String, deref_pref_str::String, incremental::Bool=true)
 
     # Construct "$left $where_expr = $right" like:
     # Modul.func(io::ScopedStream, a::T, b; kw...) where T = Modul.func(deref(io), a, b; kw...)
@@ -395,14 +394,21 @@ function _gen_scoped_stream_method!(failed::Vector{Pair{Method, String}}, where_
     endswith(modul_str, ".ScopedStreams") && return # skip ScopedStreams self
 
     # # only apply to all modules that are currently imported into __ScopedStreamsTmp
-    if !isdefined(Main.__ScopedStreamsTmp, Symbol(modul)) && !startswith(modul_str, "Base.")
+    if !isdefined(getproperty(Main, :__ScopedStreamsTmp), Symbol(modul)) && !startswith(modul_str, "Base.")
         try
-            Core.eval(Main.__ScopedStreamsTmp, Meta.parse("using $modul")) # using xxx
+            Core.eval(getproperty(Main, :__ScopedStreamsTmp), Meta.parse("using $modul")) # using xxx
         catch
             @debug "Skip $modul: cannot using $modul in Main.__ScopedStreamsTmp"
             return
         end
     end
+
+    if incremental && (m in IO_METHODS_GENERATED)
+        return
+    else
+        push!(IO_METHODS_GENERATED, m)
+    end
+
     tv, decls, file, line = Base.arg_decl_parts(m)
     decls_has_ScopedStream(decls) && return  # do not gen method for methods with type ScopedStream
 
@@ -460,7 +466,7 @@ function _gen_scoped_stream_method!(failed::Vector{Pair{Method, String}}, where_
         str = "$left $where_expr $missing_where= $right"
         
         try
-            Core.eval(Main.__ScopedStreamsTmp, Meta.parse(str))
+            Core.eval(getproperty(Main, :__ScopedStreamsTmp), Meta.parse(str))
             @debug "[$x]\t$str"
         catch e
             @debug "[$x]\t$str" exception=e  # COV_EXCL_LINE

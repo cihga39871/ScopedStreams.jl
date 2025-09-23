@@ -10,7 +10,7 @@ This ensures safe, concurrent I/O operations, enhancing reliability and performa
 
 ### Initialization
 
-`ScopedStreams.init()` needs to be manually called after loading all packages and before redirecting streams:
+`ScopedStreams.init(incremental=true)` needs to be manually called after loading all packages and before redirecting streams:
 
 ```julia
 using ScopedStreams
@@ -144,39 +144,6 @@ redirect_stream("out.txt", open("out.txt", "a+")) do
 end
 ```
 
-## Troubleshooting and known issues
-
-### 1. When you see an IO-related warning or error
-
-To troubleshoot this error, please check the following:
-
-- Did you forget to call `ScopedStreams.init()` before using `redirect_stream`?
-- Did you define new functions related to `IO`, or use other modules after running `ScopedStreams.init()`? If so, please call `ScopedStreams.init()` or `gen_scoped_stream_methods()` to refresh existing and newly defined IO-related functions.
-- Did you or some packages use `redirect_stdout`, `redirect_stderr` or `redirect_stdio`? Please avoid using them because they are not compatible with the thread-safe `redirect_stream`.
-
-### 2. This package is not compatible with `julia -E 'expr'`. Eg:
-
-```bash
-julia -E "using ScopedStreams; ScopedStreams.init(); 123"
-# 123ERROR: ScopedStream does not support byte I/O
-# Stacktrace:
-#   ...
-```
-
-To fix it, you can use `julia -e ...`, rather than `julia -E ...`:
-
-```bash
-julia -e "using ScopedStreams; ScopedStreams.init(); println(123)" 
-# 123
-```
-
-Another way to fix it, you can restore stdout and stderr to the original streams manually before the last call:
-
-```bash
-julia -E "using ScopedStreams; ScopedStreams.init(); restore_stream(); 123"
-# 123
-```
-
 ## API
 
 ### ScopedStream
@@ -210,4 +177,38 @@ module_using(modul::Module)
 public_modules(modul::Module; all::Bool=true, imported::Bool=false)
 
 loaded_stdlibs()
+```
+
+
+## Troubleshooting and known issues
+
+### 1. When you see an IO-related warning or error
+
+To troubleshoot this error, please check the following:
+
+- Did you forget to call `ScopedStreams.init()` before using `redirect_stream`?
+- Did you define new functions related to `IO`, or use other modules after running `ScopedStreams.init()`? If so, please call `ScopedStreams.init()` or `gen_scoped_stream_methods()` to refresh existing and newly defined IO-related functions.
+- Did you or some packages use `redirect_stdout`, `redirect_stderr` or `redirect_stdio`? Please avoid using them because they are not compatible with the thread-safe `redirect_stream`.
+
+### 2. This package is not compatible with `julia -E 'expr'`. Eg:
+
+```bash
+julia -E "using ScopedStreams; ScopedStreams.init(); 123"
+# 123ERROR: ScopedStream does not support byte I/O
+# Stacktrace:
+#   ...
+```
+
+To fix it, you can use `julia -e ...`, rather than `julia -E ...`:
+
+```bash
+julia -e "using ScopedStreams; ScopedStreams.init(); println(123)" 
+# 123
+```
+
+Another way to fix it, you can restore stdout and stderr to the original streams manually before the last call:
+
+```bash
+julia -E "using ScopedStreams; ScopedStreams.init(); restore_stream(); 123"
+# 123
 ```
