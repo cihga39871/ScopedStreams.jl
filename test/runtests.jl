@@ -1,11 +1,12 @@
 
-include("../src/ScopedStreams.jl")
 
-using .ScopedStreams
 using Test
 using Dates
 
+using ScopedStreams
+
 @testset begin
+
 
     fullios(x::IO, y::IO, z::IOT, u::IOT, v::IOK, w::T) where IOT <: IO where IOK <: Union{IO, Nothing} where T = println(x,y,z,u,v,w)
     m = methods(fullios)[1]

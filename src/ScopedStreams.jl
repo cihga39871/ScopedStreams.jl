@@ -326,19 +326,59 @@ function gen_scoped_stream_methods()
     lock(INIT_LOCK) do
         mods = all_modules(Main)
 
-        scoped_streams_str = locate_ScopedStreams(mods)
-        scoped_streams_str === nothing && error("Bug: cannot locate where is ScopedStreams loaded. Please report an issue at https://github.com/cihga39871/ScopedStreams.jl")
+        # scoped_streams_str = locate_ScopedStreams(mods)
+        # scoped_streams_str === nothing && error("Bug: cannot locate where is ScopedStreams loaded. Please report an issue at https://github.com/cihga39871/ScopedStreams.jl")
 
-        io_ref_type_str = string("::", scoped_streams_str, ".ScopedStream")
-        deref_pref_str = string(scoped_streams_str, ".deref(")
+        io_ref_type_str = "::ScopedStreams.ScopedStream"
+        deref_pref_str = "ScopedStreams.deref("
 
         # create a new module to import all currently loaded modules, and generate ScopedStream methods there: keep other modules clean. 
-        Core.eval(Main, Expr(:module, true, :__ScopedStreamsTmp, quote end)) # module __ScopedStreamsTmp end
+        Core.eval(Main, Expr(:module, true, :__ScopedStreamsTmp, quote
+        # module __ScopedStreamsTmp 
+            function try_get_module(symbol::Symbol)
+                mod_list = Base.loaded_modules_array()
+                for m in mod_list
+                    if nameof(m) === symbol
+                        return m
+                    end
+                end
+                return nothing
+            end
+
+            const ScopedStreams = try_get_module(:ScopedStreams)
+
+            if isnothing(ScopedStreams)
+                error("Bug: cannot locate where is ScopedStreams loaded. Please report an issue at https://github.com/cihga39871/ScopedStreams.jl")
+            end 
+        end)) # module __ScopedStreamsTmp end
 
         @debug "Loading modules in Main.__ScopedStreamsTmp:"
         for m in mods
+            if m == "ScopedStreams" || endswith(m, ".ScopedStreams")
+                continue
+            end
             @debug "    Try using $m"
-            Core.eval(Main.__ScopedStreamsTmp, Meta.parse("try; using $m; catch; end")) # using xxx
+            if '.' in m  # m's dependency link is resolved, so can directly using it
+                Core.eval(Main.__ScopedStreamsTmp, Meta.parse("""
+                try
+                    using $m
+                catch
+                    @debug("Skip $m: cannot using $m in Main.__ScopedStreamsTmp")
+                end""")) # using xxx
+            else  # m's dependency link may not resolved, so we can use a backup loading strategy in catch.
+                Core.eval(Main.__ScopedStreamsTmp, Meta.parse("""
+                try
+                    using $m
+                catch
+                    # const needs to be top level, so we need to expose mod to global and use eval.
+                    global mod = try_get_module(:$m)
+                    if mod !== nothing
+                        eval(Meta.parse("const $m = mod"))
+                    else
+                        @debug("Skip $m: cannot using $m in Main.__ScopedStreamsTmp")
+                    end
+                end""")) # using xxx
+            end
         end
 
         ms = methodswith(IO)
