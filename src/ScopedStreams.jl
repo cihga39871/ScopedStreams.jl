@@ -195,7 +195,7 @@ redirect_stream(f::Function, ::Nothing, ::Nothing, ::Nothing; mode="a+") = f()
 
 ### extend IO for redirect_stream
 
-Base.close(::Nothing) = nothing
+# Base.close(::Nothing) = nothing
 
 handle_open(::Nothing, mode) = nothing
 handle_open(io::IO, mode) = io # do not change and do not close when exit
@@ -211,12 +211,14 @@ handle_open_log(logger::AbstractLogger, mode) = logger
 
 @static if isdefined(ScopedValues, :with_logger)
     # before v1.11, ScopedValues.with_logger used to replace Logging.with_logger
+    # COV_EXCL_START
     ScopedValues.with_logger(f::Function, logger::Nothing) = f()
     function ScopedValues.with_logger(f::Function, io::IO)
         logger = SimpleLogger(io)
         ScopedValues.with_logger(f, logger)
     end
     const this_with_logger = ScopedValues.with_logger
+    # COV_EXCL_STOP
 else
     Logging.with_logger(f::Function, logger::Nothing) = f()
     function Logging.with_logger(f::Function, io::IO)
@@ -237,8 +239,8 @@ handle_finally(file::AbstractLogger, io) = nothing
 Reset `Base.stdout` and `Base.stderr` to the original streams at the time loading `ScopedStreams`.
 """
 function restore_stream()
-    global stdout_origin
-    global stderr_origin
+    global stdout_origin  # COV_EXCL_LINE
+    global stderr_origin  # COV_EXCL_LINE
     if !isnothing(stdout_origin)
         redirect_stdout(stdout_origin)
     end
@@ -263,7 +265,7 @@ function __init__()
             nothing
         else
             # Not Terminal (TTY), nor linux file redirection (fd)
-            @warn "Base.stdout was changed when initiating ScopedStreams." Base.stdout
+            @warn "Base.stdout was changed when initiating ScopedStreams." Base.stdout  # COV_EXCL_LINE
         end
         stdout_origin = deref(Base.stdout)
     end
@@ -276,7 +278,7 @@ function __init__()
             nothing
         else
             # Not Terminal (TTY), nor linux file redirection (fd)
-            @warn "Base.stderr was changed when initiating ScopedStreams." Base.stderr
+            @warn "Base.stderr was changed when initiating ScopedStreams." Base.stderr  # COV_EXCL_LINE
         end
         stderr_origin = deref(Base.stderr)
     end
@@ -325,9 +327,6 @@ function gen_scoped_stream_methods()
 
     lock(INIT_LOCK) do
         mods = all_modules(Main)
-
-        # scoped_streams_str = locate_ScopedStreams(mods)
-        # scoped_streams_str === nothing && error("Bug: cannot locate where is ScopedStreams loaded. Please report an issue at https://github.com/cihga39871/ScopedStreams.jl")
 
         io_ref_type_str = "::ScopedStreams.ScopedStream"
         deref_pref_str = "ScopedStreams.deref("
@@ -472,8 +471,8 @@ function _gen_scoped_stream_method!(failed::Vector{Pair{Method, String}}, where_
             Core.eval(Main.__ScopedStreamsTmp, Meta.parse(str))
             @debug "[$x]\t$str"
         catch e
-            @debug "[$x]\t$str" exception=e
-            push!(failed, m=>str)
+            @debug "[$x]\t$str" exception=e  # COV_EXCL_LINE
+            push!(failed, m=>str)            # COV_EXCL_LINE
         end
     end
     return
@@ -584,20 +583,6 @@ function all_modules!(mods::Vector{String}, mod_dict::Dict{Module,String}, modul
 end
 
 """
-    locate_ScopedStreams(mods::Vector{String})
-
-Locate where is `ScopedStreams` loaded. Return the string representation of the module, eg: "Main.ScopedStreams".
-"""
-function locate_ScopedStreams(mods::Vector{String})
-    for m in mods
-        if m == "ScopedStreams" || endswith(m, ".ScopedStreams")
-            return m
-        end
-    end
-    return nothing
-end
-
-"""
     decls_has_ScopedStream(decls::Vector{Tuple{String, String}}) :: Bool
 
 Check if `decls` has type `ScopedStream` or `XXX.ScopedStream`.
@@ -628,7 +613,8 @@ function get_where_exprs!(where_IO_var::Dict{String,String}, m::Method)
         if sig.var isa Base.TypeVar
             # find T in `where T<:IO`
             if sig.var.ub == ScopedStream
-                return nothing  # do not gen method for methods with type ScopedStream
+                # do not gen method for methods with type ScopedStream
+                return nothing  # COV_EXCL_LINE 
             end
             if sig.var.ub != Any && IO <: sig.var.ub  # skip Any, do not make things complicated
                 where_IO_var[string(sig.var.name)] = "where $(sig.var) "
