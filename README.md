@@ -1,4 +1,7 @@
 # ScopedStreams.jl
+
+[![codecov](https://codecov.io/github/cihga39871/ScopedStreams.jl/branch/main/graph/badge.svg)](https://app.codecov.io/github/cihga39871/ScopedStreams)
+
 Julia's built-in `stdout` and `stderr` are global, and modifying them conventionally is not thread-safe, posing challenges in multi-threaded applications. The ScopedStreams.jl package addresses this by enabling scope-dependent `stdout` and `stderr`, allowing each task to operate with isolated standard output and error streams.
 
 This ensures safe, concurrent I/O operations, enhancing reliability and performance in parallel computing tasks. Julia users should adopt ScopedStreams for robust, thread-safe stream management in multi-threaded environments.
