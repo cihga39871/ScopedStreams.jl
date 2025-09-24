@@ -272,7 +272,7 @@ function __init__()
     global stderr_origin
     # create a new module to import all currently loaded modules, and generate ScopedStream methods there: keep other modules clean. 
     if !isdefined(Main, :__ScopedStreamsTmp)
-        Core.eval(Main, Expr(:module, true, :__ScopedStreamsTmp, quote end))
+        Core.eval(Main, Expr(:module, true, :__ScopedStreamsTmp, quote Base.__precompile__(false) end))
     end
     gen_scoped_stream_methods(true)
 
