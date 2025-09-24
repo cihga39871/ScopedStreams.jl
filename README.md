@@ -140,18 +140,6 @@ ScopedStreams.__init__()
 restore_stream()
 ```
 
-### Reflection used in ScopedStreams
-
-```julia
-all_modules(modul::Module, modul_str::String=string(modul); stdlibs::Bool=true)
-
-module_using(modul::Module)
-
-public_modules(modul::Module; all::Bool=true, imported::Bool=false)
-
-loaded_stdlibs()
-```
-
 
 ## Troubleshooting and known issues
 
@@ -187,31 +175,29 @@ julia -E "using ScopedStreams; restore_stream(); 123"
 
 ## Underlying principles
 
-`ScopedStreams.__init__()` is automatically called after loading the package:
+`ScopedStreams.__init__()` is automatically called after loading the package. The init function does the following jobs:
 
-The function will create a temporary module `Main.__ScopedStreamsTmp`, which imports all currently loaded modules (including packages).
+1. New methods are generated for `ScopedStream` based on the currently-defined methods with `IO` using `gen_scoped_stream_methods(incremental=true)`. You can check the new methods:
 
-Then, within the temporary module, new methods are generated for `ScopedStream` based on the currently-defined methods with `IO` using `gen_scoped_stream_methods(incremental=true)`. You can check the new methods:
+    ```julia
+    julia> methodswith(ScopedStream)[1:5]
+    [1] IOContext(io::ScopedStream, context::ScopedStream) @ ScopedStreams none:1
+    [2] IOContext(io::ScopedStream) @ ScopedStreams none:1
+    [3] IOContext(io::ScopedStream, dict::Base.ImmutableDict{Symbol, Any}) @ ScopedStreams none:1
+    [4] IOContext(io::ScopedStream, context::IO) @ ScopedStreams none:1
+    [5] IOContext(io::IO, context::ScopedStream) @ ScopedStreams none:1
+    ```
 
-```julia
-julia> methodswith(ScopedStream)[1:5]
-[1] IOContext(io::ScopedStream, context::ScopedStream) @ Main.__ScopedStreamsTmp none:1
-[2] IOContext(io::ScopedStream) @ Main.__ScopedStreamsTmp none:1
-[3] IOContext(io::ScopedStream, dict::Base.ImmutableDict{Symbol, Any}) @ Main.__ScopedStreamsTmp none:1
-[4] IOContext(io::ScopedStream, context::IO) @ Main.__ScopedStreamsTmp none:1
-[5] IOContext(io::IO, context::ScopedStream) @ Main.__ScopedStreamsTmp none:1
-```
+    `ScopedStream` is a wrapper of `ScopedValue{IO}`, but belongs to `IO` abstract type, so any call with `IO` now has specialized methods for `ScopedStream`.
 
-`ScopedStream` is a wrapper of `ScopedValue{IO}`, but belongs to `IO` abstract type, so any call with `IO` now has specialized methods for `ScopedStream`.
+2. After that, backup the original stdout and stderr to `ScopedStreams.stdout_origin` and `ScopedStreams.stderr_origin`.
 
-After that, backup the original stdout and stderr to `ScopedStreams.stdout_origin` and `ScopedStreams.stderr_origin`.
+3. Finally, wrap stdout and stderr to `ScopedStream`. You can check it using the following code:
 
-Finally, wrap stdout and stderr to `ScopedStream`. You can check it using the following code:
+    ```julia
+    julia> stdout
+    ScopedStream(Base.ScopedValues.ScopedValue{IO}(Base.TTY(RawFD(17) open, 0 bytes waiting)))
 
-```julia
-julia> stdout
-ScopedStream(Base.ScopedValues.ScopedValue{IO}(Base.TTY(RawFD(17) open, 0 bytes waiting)))
-
-julia> stderr
-ScopedStream(Base.ScopedValues.ScopedValue{IO}(Base.TTY(RawFD(19) open, 0 bytes waiting)))
-```
+    julia> stderr
+    ScopedStream(Base.ScopedValues.ScopedValue{IO}(Base.TTY(RawFD(19) open, 0 bytes waiting)))
+    ```

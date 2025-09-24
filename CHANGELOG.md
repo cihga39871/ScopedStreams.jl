@@ -1,5 +1,10 @@
 # CHANGE LOG
 
+### v0.3.0
+
+- Breaking: remove reflection functions. No need to use them.
+- Fix: now the package can be used within other modules and can be precompiled within other modules.
+
 ### v0.2.1
 
 - Feat: no need to manually call `init`. This function is removed.
