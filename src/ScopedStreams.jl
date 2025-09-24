@@ -293,7 +293,7 @@ function __init__()
         end
 
         # generate methods for ScopedStream
-        gen_scoped_stream_methods(true)
+        # gen_scoped_stream_methods(true)
 
         # redirect Base.stdxxx to ScopedStream if not already
         if !(Base.stdout isa ScopedStream)
@@ -545,5 +545,7 @@ function compute_id_alters(N::Int)
     end
     ID_ALTERS_COMPUTED[N] = id_alters
 end
+
+gen_scoped_stream_methods(true)
 
 end # module ScopedStreams
