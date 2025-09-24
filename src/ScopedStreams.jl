@@ -4,7 +4,7 @@ using ScopedValues
 using Logging
 import InteractiveUtils: methodswith
 
-export ScopedStream, deref, redirect_stream, gen_scoped_stream_methods, restore_stream
+export ScopedStream, deref, gen_scoped_stream_methods, redirect_stream, restore_stream
 
 ########### Globals ###########
 
@@ -62,9 +62,6 @@ Get the actual `IO` from `ScopedStream`, or return the input if it is not a `Sco
 - `log`: besides the types supported by `out`, also support `AbstractLogger`.
 - `mode`: same as `open(..., mode)`. Only used for `AbstractString` positional arguments.
 
-### Prerequisite
-Call `ScopedStreams.init()` first to enable scope-dependent `Base.stdout` and `Base.stderr`. Otherwise, it will fall back to no redirection. If you define or import new methods for `IO` types, please call `gen_scoped_stream_methods()` first to refresh existing functions and include newly defined functions for IO.
-
 ### Tips
 - Do not mess up this function with Base methods `redirect_stdout`, `redirect_stderr`, and `redirect_stdio` because the Base methods are **not thread-safe**, and calling them will mess up `redirect_stream` redirection.
 - If passing an `IO` or `AbstractLogger`, it won't be closed. Please use `close(io)` or `JobSchedulers.close_in_future(io, jobs)` manually.
@@ -73,8 +70,6 @@ Call `ScopedStreams.init()` first to enable scope-dependent `Base.stdout` and `B
 ### Examples
 ```julia
 using ScopedStreams, Dates
-
-ScopedStreams.init()  # generate methods for ScopedStream and enable scope-dependent Base.stdout and Base.stderr
 
 # defines streams for redirection
 iob = IOBuffer()
@@ -172,7 +167,7 @@ function redirect_stream(f::Function, outfile, errfile, logfile; mode="a+")
         end
     catch ex
         if typeof(ex) === ErrorException && endswith(ex.msg, "has no field ref")
-            @warn("Fallback to default stdout and stderr because they are not initialized for thread-safe redirection. \nTo fix it, please call `ScopedStreams.init()` first, and avoid using Base's `redirect_std***` functions.")
+            @warn("Fallback to default stdout and stderr because they are not thread-safe at this time. It is caused by function call of `Base.redirect_std***`. \nTo fix it, please run `ScopedStreams.__init__()` manually.")
             this_with_logger(f, log)
         else
             rethrow(ex)
@@ -250,13 +245,37 @@ function restore_stream()
     end
 end
 
+"""
+    (f::Base.RedirectStdStream)(io::ScopedStream) = f(deref(io))
+
+Cannot auto generated this method because base/stream.jl does not have a method `(f::Base.RedirectStdStream)(io::IO)`
+
+It is for backward compatibility of `Base.redirect_stdout` and `Base.redirect_stderr` only. Do not call it because it will make stdout or stderr not thread-safe.
+
+To make stdout and stderr redirect thread-safe, please use [`ScopedStreams.__init__`](@ref) instead.
+"""
+function (f::Base.RedirectStdStream)(io::ScopedStream)
+    f(deref(io))
+end
+
 ########### Initialization ###########
 
+"""
+    ScopedStreams.__init__()
+
+Initializing ScopedStreams: 
+1. Generate methods for ScopedStream and 
+2. Enable scope-dependent Base.stdout and Base.stderr, allowing each task to have its own isolated standard output and error streams.
+"""
 function __init__()
     global stdout_origin
     global stderr_origin
     # create a new module to import all currently loaded modules, and generate ScopedStream methods there: keep other modules clean. 
-    Core.eval(Main, Expr(:module, true, :__ScopedStreamsTmp, quote end))
+    if !isdefined(Main, :__ScopedStreamsTmp)
+        Core.eval(Main, Expr(:module, true, :__ScopedStreamsTmp, quote end))
+    end
+    gen_scoped_stream_methods(true)
+
     # save original stdxxx to stdxxx_origin
     if isnothing(stdout_origin)
         if Base.stdout isa ScopedStream || Base.stdout isa Base.TTY || occursin(r"<fd .*>|RawFD\(\d+\)|WindowsRawSocket\(", string(Base.stdout))
@@ -276,27 +295,13 @@ function __init__()
         end
         stderr_origin = deref(Base.stderr)
     end
-end
 
-"""
-    ScopedStreams.init(incremental::Bool=true)
-
-Initializing ScopedStreams: 
-1. Generate methods for ScopedStream and 
-2. Enable scope-dependent Base.stdout and Base.stderr, allowing each task to have its own isolated standard output and error streams.
-
-- `incremental::Bool=true`: only generate methods for newly defined methods for `IO` since last call. If `false`, regenerate all methods for `IO`.
-"""
-function init(incremental::Bool=true)
-    lock(INIT_LOCK) do
-        gen_scoped_stream_methods(incremental)
-
-        if !(Base.stdout isa ScopedStream)
-            Base._redirect_io_global(ScopedStream(Base.stdout), 1)
-        end
-        if !(Base.stderr isa ScopedStream)
-            Base._redirect_io_global(ScopedStream(Base.stderr), 2)
-        end
+    # redirect Base.stdxxx to ScopedStream if not already
+    if !(Base.stdout isa ScopedStream)
+        Base._redirect_io_global(ScopedStream(stdout_origin), 1)
+    end
+    if !(Base.stderr isa ScopedStream)
+        Base._redirect_io_global(ScopedStream(stderr_origin), 2)
     end
 end
 
@@ -320,7 +325,7 @@ Base.write(io::IO, x::UInt8)
 Base.write(io::ScopedStream, x::UInt8) = Base.write(deref(io), x)
 ```
 
-The function is called in `ScopedStreams.init()`. You can also manually run it to refresh existing functions and include newly defined functions.
+The function is called in `ScopedStreams.__init__()`. You can also manually run it to refresh existing functions and include newly defined functions.
 """
 function gen_scoped_stream_methods(incremental::Bool=true)
     # https://github.com/JuliaLang/julia/blob/v1.11.6/base/methodshow.jl#L80

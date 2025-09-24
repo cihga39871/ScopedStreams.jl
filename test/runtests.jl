@@ -5,7 +5,9 @@ using Dates
 using Logging
 using ScopedStreams
 
+
 @testset begin
+    # ScopedStreams.__init__()
 
     function f(prepend::String, repeat_time::Int)
         for i in 1:repeat_time
@@ -19,10 +21,17 @@ using ScopedStreams
     fullios(x::IO, y::IO, z::IOT, u::IOT, v::IOK, w::T) where IOT <: IO where IOK <: Union{IO, Nothing} where T = println(x,y,z,u,v,w)
     m = methods(fullios)[1]
 
+
+    redirect_stdout(ScopedStreams.stdout_origin) do  # test not breaking
+        f("normal stdout", 1)
+    end
+
+    restore_stream()
     @test_warn "Fallback" redirect_stream(nothing, nothing, current_logger()) do
         f("normal stdout", 1)
     end
 
+    ScopedStreams.__init__()
     @test ScopedStreams.handle_open(nothing, "a+") === nothing
 
     @test ScopedStreams.handle_open_log(current_logger(), "a+") === current_logger()
@@ -32,9 +41,6 @@ using ScopedStreams
     @test ScopedStreams.handle_finally(current_logger(), 1) === nothing
 
     @test ScopedStreams.this_with_logger(()->123, nothing) == 123
-
-    ScopedStreams.init(false) # do not incremental, regenerate all methods for IO
-    ScopedStreams.init(true) # incremental, only generate methods for newly defined methods for IO
 
     @test Base.stdout isa ScopedStream
     @test Base.stderr isa ScopedStream
