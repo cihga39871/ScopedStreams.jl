@@ -19,6 +19,9 @@ using ScopedStreams
     fullios(x::IO, y::IO, z::IOT, u::IOT, v::IOK, w::T) where IOT <: IO where IOK <: Union{IO, Nothing} where T = println(x,y,z,u,v,w)
     m = methods(fullios)[1]
 
+    gen_scoped_stream_methods(false)
+    ScopedStreams.compute_id_alters(5)
+
     @test_warn "Fallback" redirect_stream(nothing, nothing, current_logger()) do
         f("normal stdout", 1)
     end
