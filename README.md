@@ -8,37 +8,13 @@ This ensures safe, concurrent I/O operations, enhancing reliability and performa
 
 ## Usage
 
-### Initialization
-
-`ScopedStreams.init(incremental=true)` needs to be manually called after loading all packages and before redirecting streams:
+### Recommended to load this package after other modules.
 
 ```julia
-using ScopedStreams
-ScopedStreams.init()
+using Dates
+using XXX
+using ScopedStreams  # load at last
 ```
-
-The function will
-
-1. Generate new methods for `ScopedStream` based on the currently-defined methods with `IO`. Eg:
-   ```julia
-    julia> methodswith(ScopedStream)[1:5]
-    [1] IOContext(io::ScopedStream, context::ScopedStream) @ Main.__ScopedStreamsTmp none:1
-    [2] IOContext(io::ScopedStream) @ Main.__ScopedStreamsTmp none:1
-    [3] IOContext(io::ScopedStream, dict::Base.ImmutableDict{Symbol, Any}) @ Main.__ScopedStreamsTmp none:1
-    [4] IOContext(io::ScopedStream, context::IO) @ Main.__ScopedStreamsTmp none:1
-    [5] IOContext(io::IO, context::ScopedStream) @ Main.__ScopedStreamsTmp none:1
-   ```
-   
-2. Enable scope-dependent `Base.stdout` and `Base.stderr`. Eg:
-
-   ```julia
-    julia> stdout
-    ScopedStream(Base.ScopedValues.ScopedValue{IO}(Base.TTY(RawFD(17) open, 0 bytes waiting)))
-
-    julia> stderr
-    ScopedStream(Base.ScopedValues.ScopedValue{IO}(Base.TTY(RawFD(19) open, 0 bytes waiting)))
-   ```
-
 
 ### Main function to redirect stdout, stderr, and logger
 
@@ -64,8 +40,6 @@ redirect_stream(f::Function, out, err, log; mode="a+")
 #### Examples
 ```julia
 using ScopedStreams, Dates
-
-ScopedStreams.init()  # generate methods for ScopedStream and enable scope-dependent Base.stdout and Base.stderr
 
 # defines streams for redirection
 iob = IOBuffer()
@@ -161,22 +135,9 @@ redirect_stream(f::Function, out, err, log; mode="a+")
 
 gen_scoped_stream_methods()
 
-ScopedStreams.init()
 ScopedStreams.__init__()
 
 restore_stream()
-```
-
-### Reflection used in ScopedStreams
-
-```julia
-all_modules(modul::Module, modul_str::String=string(modul); stdlibs::Bool=true)
-
-module_using(modul::Module)
-
-public_modules(modul::Module; all::Bool=true, imported::Bool=false)
-
-loaded_stdlibs()
 ```
 
 
@@ -186,14 +147,13 @@ loaded_stdlibs()
 
 To troubleshoot this error, please check the following:
 
-- Did you forget to call `ScopedStreams.init()` before using `redirect_stream`?
-- Did you define new functions related to `IO`, or use other modules after running `ScopedStreams.init()`? If so, please call `ScopedStreams.init()` or `gen_scoped_stream_methods()` to refresh existing and newly defined IO-related functions.
-- Did you or some packages use `redirect_stdout`, `redirect_stderr` or `redirect_stdio`? Please avoid using them because they are not compatible with the thread-safe `redirect_stream`.
+- Did you define new functions related to `IO`, or use other modules after loading `ScopedStreams`? It is recommended to load the package at the end. If it is not possible, please manually call `gen_scoped_stream_methods()` to generate specialized ScopeStream methods for the newly defined IO-related functions.
+- Did you or some packages use `redirect_stdout`, `redirect_stderr` or `redirect_stdio`? Please avoid using those functions because they are not compatible with the thread-safe `redirect_stream`.
 
 ### 2. This package is not compatible with `julia -E 'expr'`. Eg:
 
 ```bash
-julia -E "using ScopedStreams; ScopedStreams.init(); 123"
+julia -E "using ScopedStreams; 123"
 # 123ERROR: ScopedStream does not support byte I/O
 # Stacktrace:
 #   ...
@@ -202,13 +162,42 @@ julia -E "using ScopedStreams; ScopedStreams.init(); 123"
 To fix it, you can use `julia -e ...`, rather than `julia -E ...`:
 
 ```bash
-julia -e "using ScopedStreams; ScopedStreams.init(); println(123)" 
+julia -e "using ScopedStreams; println(123)" 
 # 123
 ```
 
 Another way to fix it, you can restore stdout and stderr to the original streams manually before the last call:
 
 ```bash
-julia -E "using ScopedStreams; ScopedStreams.init(); restore_stream(); 123"
+julia -E "using ScopedStreams; restore_stream(); 123"
 # 123
 ```
+
+## Underlying principles
+
+`ScopedStreams.__init__()` is automatically called after loading the package. The init function does the following jobs:
+
+1. New methods are generated for `ScopedStream` based on the currently-defined methods with `IO` using `gen_scoped_stream_methods(incremental=true)`. You can check the new methods:
+
+    ```julia
+    julia> methodswith(ScopedStream)[1:5]
+    [1] IOContext(io::ScopedStream, context::ScopedStream) @ ScopedStreams none:1
+    [2] IOContext(io::ScopedStream) @ ScopedStreams none:1
+    [3] IOContext(io::ScopedStream, dict::Base.ImmutableDict{Symbol, Any}) @ ScopedStreams none:1
+    [4] IOContext(io::ScopedStream, context::IO) @ ScopedStreams none:1
+    [5] IOContext(io::IO, context::ScopedStream) @ ScopedStreams none:1
+    ```
+
+    `ScopedStream` is a wrapper of `ScopedValue{IO}`, but belongs to `IO` abstract type, so any call with `IO` now has specialized methods for `ScopedStream`.
+
+2. After that, backup the original stdout and stderr to `ScopedStreams.stdout_origin` and `ScopedStreams.stderr_origin`.
+
+3. Finally, wrap stdout and stderr to `ScopedStream`. You can check it using the following code:
+
+    ```julia
+    julia> stdout
+    ScopedStream(Base.ScopedValues.ScopedValue{IO}(Base.TTY(RawFD(17) open, 0 bytes waiting)))
+
+    julia> stderr
+    ScopedStream(Base.ScopedValues.ScopedValue{IO}(Base.TTY(RawFD(19) open, 0 bytes waiting)))
+    ```

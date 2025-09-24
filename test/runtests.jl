@@ -5,6 +5,7 @@ using Dates
 using Logging
 using ScopedStreams
 
+
 @testset begin
 
     function f(prepend::String, repeat_time::Int)
@@ -22,10 +23,16 @@ using ScopedStreams
     gen_scoped_stream_methods(false)
     ScopedStreams.compute_id_alters(5)
 
+    redirect_stdout(ScopedStreams.stdout_origin) do  # test not breaking
+        f("normal stdout", 1)
+    end
+
+    restore_stream()
     @test_warn "Fallback" redirect_stream(nothing, nothing, current_logger()) do
         f("normal stdout", 1)
     end
 
+    ScopedStreams.__init__()
     @test ScopedStreams.handle_open(nothing, "a+") === nothing
 
     @test ScopedStreams.handle_open_log(current_logger(), "a+") === current_logger()
@@ -35,9 +42,6 @@ using ScopedStreams
     @test ScopedStreams.handle_finally(current_logger(), 1) === nothing
 
     @test ScopedStreams.this_with_logger(()->123, nothing) == 123
-
-    ScopedStreams.init(false) # do not incremental, regenerate all methods for IO
-    ScopedStreams.init(true) # incremental, only generate methods for newly defined methods for IO
 
     @test Base.stdout isa ScopedStream
     @test Base.stderr isa ScopedStream
@@ -64,7 +68,6 @@ using ScopedStreams
         end
         schedule(t1); schedule(t2)
         wait(t1) ; wait(t2)
-
 
         redirect_stream(iob, iof) do
             f("iob/iof", 1)
