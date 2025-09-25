@@ -27,7 +27,7 @@ using ScopedStreams
     @test Base.stderr isa ScopedStream
     
 
-    gen_scoped_stream_methods(false)
+    ScopedStreams.gen_scoped_stream_methods(false)
     ScopedStreams.compute_id_alters(5)
 
     redirect_stdout(ScopedStreams.stdout_origin) do  # test not breaking
