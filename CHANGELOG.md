@@ -1,5 +1,9 @@
 # CHANGE LOG
 
+### v0.3.2
+
+- Feat: when importing loaded modules, also import the public types defined in it.
+
 ### v0.3.1
 
 - Feat: new macro `@gen_scoped_stream_methods` to allow users to generate methods within their module. It avoid precompilation error and hygine issue using `gen_scoped_stream_methods`.

@@ -302,7 +302,7 @@ function __init__()
 end
 
 
-########### Reflection ###########
+########### Generate IO Methods ###########
 
 """
     @gen_scoped_stream_methods(incremental::Bool=true)
@@ -363,11 +363,8 @@ function gen_scoped_stream_methods(incremental::Bool=true; mod=@__MODULE__)
         loaded_mods = Base.loaded_modules_array()
         # load modules in advance in case some method contain var type from a module, but not imported yet
         for modul in loaded_mods
-            modul_sym = nameof(modul)
-            if !isdefined(mod, modul_sym)
-                # make sure modul is accessible in this module, but do not use `using` or `import` because they have strict rules
-                Core.eval(mod, :(const $(modul_sym) = $modul))
-            end
+            # make sure modul and its public types is accessible in this module, but do not use `using` or `import` because they have strict rules
+            psuedo_import_module_and_types(modul, mod)
         end
 
         ms = methodswith(IO)
@@ -389,12 +386,9 @@ function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, Str
     # Modul.func(io::ScopedStream, a::T, b; kw...) where T = Modul.func(deref(io), a, b; kw...)
 
     modul = m.module
-    modul_sym = nameof(modul)
 
-    if !isdefined(mod, modul_sym)
-        # make sure modul is accessible in this module, but do not use `using` or `import` because they have strict rules
-        Core.eval(mod, :(const $(modul_sym) = $modul))
-    end
+    # make sure modul and its public types is accessible in this module, but do not use `using` or `import` because they have strict rules
+    psuedo_import_module_and_types(modul, mod)
 
     if modul === @__MODULE__
         return  # skip ScopedStreams self
@@ -596,6 +590,29 @@ function compute_id_alters(N::Int)
         i += 1
     end
     ID_ALTERS_COMPUTED[N] = id_alters
+end
+
+
+########### Reflection ###########
+
+"""
+    psuedo_import_module_and_types(modul::Module, to::Module)
+
+Make `modul::Module` and its exported `Type`s available in `to::Module`. If the symbol of modul is defined in `to`, do nothing.
+"""
+function psuedo_import_module_and_types(modul::Module, to::Module)
+    modul_sym = nameof(modul)
+    if !isdefined(to, modul_sym)
+        # make sure modul is accessible in this module, but do not use `using` or `import` because they have strict rules
+        Core.eval(to, :(const $(modul_sym) = $modul))
+        ns = names(modul)
+        for name in ns
+            var = getproperty(modul, name)
+            if var isa Type && !isdefined(to, name)
+                Core.eval(to, :($(name) = $var))
+            end
+        end
+    end
 end
 
 gen_scoped_stream_methods(true)
