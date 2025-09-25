@@ -2,8 +2,9 @@
 
 ### v0.3.1
 
+- Feat: new macro `@gen_scoped_stream_methods` to allow users to generate methods within their module. It avoid precompilation error and hygine issue using `gen_scoped_stream_methods`.
+- Feat: `gen_scoped_stream_methods` allows users to determine what module they want to generate methods in.
 - Fix: gen method: couldn't correctly gen methods containing a positional argument ending with "..."
-- Feat: macro gen method to allow users to generate methods within their module. It avoid precompilation error.
 
 ### v0.3.0
 

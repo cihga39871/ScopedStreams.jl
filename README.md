@@ -120,7 +120,6 @@ end
 
 ## API
 
-### ScopedStream
 
 ```julia
 ScopedStream(io::IO)
@@ -133,7 +132,8 @@ redirect_stream(f::Function, out; mode="a+")
 redirect_stream(f::Function, out, err; mode="a+")
 redirect_stream(f::Function, out, err, log; mode="a+")
 
-gen_scoped_stream_methods()
+@gen_scoped_stream_methods
+ScopedStreams.gen_scoped_stream_methods(incremental=true; mod=@__MODULE__)
 
 ScopedStreams.__init__()
 
@@ -147,7 +147,7 @@ restore_stream()
 
 To troubleshoot this error, please check the following:
 
-- Did you define new functions related to `IO`, or use other modules after loading `ScopedStreams`? It is recommended to load the package at the end. If it is not possible, please manually call `gen_scoped_stream_methods()` to generate specialized ScopeStream methods for the newly defined IO-related functions.
+- Did you define new functions related to `IO`, or use other modules after loading `ScopedStreams`? It is recommended to load the package at the end. If it is not possible, please manually call `@gen_scoped_stream_methods` to generate specialized ScopeStream methods for the newly defined IO-related functions in your module.
 - Did you or some packages use `redirect_stdout`, `redirect_stderr` or `redirect_stdio`? Please avoid using those functions because they are not compatible with the thread-safe `redirect_stream`.
 
 ### 2. This package is not compatible with `julia -E 'expr'`. Eg:
