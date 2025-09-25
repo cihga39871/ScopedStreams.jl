@@ -1,5 +1,9 @@
 # CHANGE LOG
 
+### v0.3.3
+
+- Compat: fix a weird case in julia v1.8.5: some vars is in `names(mod)`, but mod does not defined.
+
 ### v0.3.2
 
 - Feat: when importing loaded modules, also import the public types defined in it.

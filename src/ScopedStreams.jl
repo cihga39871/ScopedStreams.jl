@@ -605,6 +605,9 @@ function psuedo_import_module_and_types(modul::Module, to::Module)
         Core.eval(to, :(const $(modul_sym) = $modul))
         ns = names(modul)
         for name in ns
+            if !isdefined(modul, name)  # happens in some weird cases in julia v1.8.5
+                continue
+            end
             var = getproperty(modul, name)
             if var isa Type && !isdefined(to, name)
                 Core.eval(to, :($(name) = $var))
