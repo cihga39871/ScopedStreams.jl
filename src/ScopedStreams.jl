@@ -328,7 +328,7 @@ macro gen_scoped_stream_methods(incremental=true)
         if !isdefined($__module__, :__ScopedStreamsTmp)
             Core.eval($__module__, :(module __ScopedStreamsTmp end))
         end
-        gen_scoped_stream_methods($incremental; mod=$__module__.__ScopedStreamsTmp)
+        ScopedStreams.gen_scoped_stream_methods($incremental; mod=$__module__.__ScopedStreamsTmp)
     end)
 end
 
