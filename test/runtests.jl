@@ -7,7 +7,6 @@ using ScopedStreams
 
 
 @testset begin
-    # ScopedStreams.__init__()
 
     function f(prepend::String, repeat_time::Int)
         for i in 1:repeat_time
@@ -21,6 +20,8 @@ using ScopedStreams
     fullios(x::IO, y::IO, z::IOT, u::IOT, v::IOK, w::T) where IOT <: IO where IOK <: Union{IO, Nothing} where T = println(x,y,z,u,v,w)
     m = methods(fullios)[1]
 
+    gen_scoped_stream_methods(false)
+    ScopedStreams.compute_id_alters(5)
 
     redirect_stdout(ScopedStreams.stdout_origin) do  # test not breaking
         f("normal stdout", 1)
@@ -67,7 +68,6 @@ using ScopedStreams
         end
         schedule(t1); schedule(t2)
         wait(t1) ; wait(t2)
-
 
         redirect_stream(iob, iof) do
             f("iob/iof", 1)
