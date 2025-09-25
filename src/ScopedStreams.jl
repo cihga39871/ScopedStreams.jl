@@ -339,7 +339,7 @@ function gen_scoped_stream_methods(incremental::Bool=true; mod=@__MODULE__)
 end
 
 macro gen_scoped_stream_methods(incremental)
-    esc(gen_scoped_stream_methods($incremental; mod=__module__))
+    esc(gen_scoped_stream_methods(incremental; mod=__module__))
     # return Expr(:escape, Expr(:call, GlobalRef(ScopedStreams, :gen_scoped_stream_methods), __module__, Expr(:quote, ex)))
 end
 
@@ -407,7 +407,7 @@ function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, Str
                     left *= d[1]
                     left *= "::"
                     left *= d[2]
-                    
+
                     right *= d[1]
                     if endswith(d[2], "...")
                         right *= "..."
