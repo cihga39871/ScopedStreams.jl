@@ -1,5 +1,10 @@
 # CHANGE LOG
 
+### v0.3.1
+
+- Fix: gen method: couldn't correctly gen methods containing a positional argument ending with "..."
+- Feat: macro gen method to allow users to generate methods within their module. It avoid precompilation error.
+
 ### v0.3.0
 
 - Breaking: remove reflection functions. No need to use them.

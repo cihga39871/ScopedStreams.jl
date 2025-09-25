@@ -338,6 +338,11 @@ function gen_scoped_stream_methods(incremental::Bool=true; mod=@__MODULE__)
     end
 end
 
+macro gen_scoped_stream_methods(incremental)
+    esc(gen_scoped_stream_methods($incremental; mod=__module__))
+    # return Expr(:escape, Expr(:call, GlobalRef(ScopedStreams, :gen_scoped_stream_methods), __module__, Expr(:quote, ex)))
+end
+
 function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, String}}, where_IO_var::Dict{String,String}, m::Method, x::Int, incremental::Bool=true)
     # https://github.com/JuliaLang/julia/blob/v1.11.6/base/methodshow.jl#L80
 
@@ -353,7 +358,7 @@ function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, Str
     modul_str = string(modul)
     modul_sym = nameof(modul)
     
-    if !isdefined(@__MODULE__, modul_sym)
+    if !isdefined(mod, modul_sym)
         Core.eval(mod, :(const $(modul_sym) = $modul))  # make sure modul is accessible in this module, but do not use `using` or `import` because they have strict rules
     end
 
@@ -392,15 +397,25 @@ function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, Str
             end
             if !isempty(d[2])
                 if i in idx_alter
-                    left  = string(left , d[1], "::ScopedStreams.ScopedStream")
-                    right = string(right, "ScopedStreams.deref(", d[1], ")")
+                    left *= d[1]
+                    left *= "::ScopedStreams.ScopedStream"
+
+                    right *= "ScopedStreams.deref("
+                    right *= d[1]
+                    right *= ")"
                 else
-                    left = string(left, d[1], "::", d[2])
-                    right = string(right, d[1])
+                    left *= d[1]
+                    left *= "::"
+                    left *= d[2]
+                    
+                    right *= d[1]
+                    if endswith(d[2], "...")
+                        right *= "..."
+                    end
                 end
             else
-                left = string(left, d[1])
-                right = string(right, d[1])
+                left *= d[1]
+                right *= d[1]
             end
             if i < length(decls) - 1
                 left  *= ", "
