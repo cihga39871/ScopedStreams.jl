@@ -13,7 +13,7 @@ ScopedValues = "7e506255-f358-4e82-b7e4-beb19740aa63"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 
 [extensions]
-SSTestExt = "Test"
+TestExt = "Test"
 
 [compat]
 Dates = "1"
