@@ -13,10 +13,6 @@ stderr_origin = nothing  # re-defined in __init__()
 
 const INIT_LOCK = ReentrantLock()
 
-const STDLIB_NAMES = Set(readdir(Sys.STDLIB))
-push!(STDLIB_NAMES, "Base")
-push!(STDLIB_NAMES, "Core")
-
 const ID_ALTERS_COMPUTED = Dict{Int, Vector{Vector{Int64}}}()
 const IO_METHODS_GENERATED = Set{Method}()
 sizehint!(IO_METHODS_GENERATED, 1000)
