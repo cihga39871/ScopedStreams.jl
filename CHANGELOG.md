@@ -3,6 +3,7 @@
 ### v0.3.2
 
 - Feat: when importing loaded modules, also import the public types defined in it.
+- Feat: weak dep of Test, in case other modules depending on ScopedStreams failed test because of test IO.
 
 ### v0.3.1
 
