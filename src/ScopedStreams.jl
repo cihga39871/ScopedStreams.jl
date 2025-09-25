@@ -242,16 +242,14 @@ function restore_stream()
 end
 
 """
+    (f::Base.RedirectStdStream)(io::Any)
     (f::Base.RedirectStdStream)(io::ScopedStream) = f(deref(io))
 
-Cannot auto generated this method because base/stream.jl does not have a method `(f::Base.RedirectStdStream)(io::IO)`
-
-It is for backward compatibility of `Base.redirect_stdout` and `Base.redirect_stderr` only. Do not call it because it will make stdout or stderr not thread-safe.
-
-To make stdout and stderr redirect thread-safe, please use [`ScopedStreams.__init__`](@ref) instead.
+To thread-safely redirect stdout and stderr, please use [`redirect_stream`](@ref) instead.
 """
 function (f::Base.RedirectStdStream)(io::ScopedStream)
     f(deref(io))
+    Base._redirect_io_global(io, f.unix_fd)
 end
 
 ########### Initialization ###########
@@ -293,10 +291,10 @@ function __init__()
 
         # redirect Base.stdxxx to ScopedStream if not already
         if !(Base.stdout isa ScopedStream)
-            Base._redirect_io_global(ScopedStream(stdout_origin), 1)
+            redirect_stdout(ScopedStream(stdout_origin))
         end
         if !(Base.stderr isa ScopedStream)
-            Base._redirect_io_global(ScopedStream(stderr_origin), 2)
+            redirect_stderr(ScopedStream(stderr_origin))
         end
     end
 end

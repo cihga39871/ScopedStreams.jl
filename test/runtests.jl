@@ -20,6 +20,13 @@ using ScopedStreams
     fullios(x::IO, y::IO, z::IOT, u::IOT, v::IOK, w::T) where IOT <: IO where IOK <: Union{IO, Nothing} where T = println(x,y,z,u,v,w)
     m = methods(fullios)[1]
 
+    @test Base.stdout isa ScopedStream
+    @test Base.stderr isa ScopedStream
+
+    @test_nowarn 1+1 ## @test_nowarn use redirect_stderr, check whether stderr is a ScopedStream later
+    @test Base.stderr isa ScopedStream
+    
+
     gen_scoped_stream_methods(false)
     ScopedStreams.compute_id_alters(5)
 
@@ -43,8 +50,6 @@ using ScopedStreams
 
     @test ScopedStreams.this_with_logger(()->123, nothing) == 123
 
-    @test Base.stdout isa ScopedStream
-    @test Base.stderr isa ScopedStream
     @test ScopedStreams.handle_open(Base.stdout, "a+") === ScopedStreams.deref(Base.stdout)
 
     @test ScopedStream(Base.stdout) === Base.stdout
