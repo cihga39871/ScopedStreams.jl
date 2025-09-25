@@ -323,21 +323,22 @@ Base.write(io::ScopedStream, x::UInt8) = Base.write(deref(io), x)
 
 The function is called in `ScopedStreams.__init__()`. You can also manually run it to refresh existing functions and include newly defined functions.
 """
-function gen_scoped_stream_methods(incremental::Bool=true)
+function gen_scoped_stream_methods(incremental::Bool=true; mod=@__MODULE__)
+    @debug "The modules" user_mod=mod macro_mod=@__MODULE__
     lock(INIT_LOCK) do
         ms = methodswith(IO)
         failed = Pair{Method, String}[]
         where_IO_var = Dict{String,String}()  # like ("IOT" => "where IOT<:IO")
 
         for (x, m) in enumerate(ms)
-            _gen_scoped_stream_method!(failed, where_IO_var, m, x, incremental)
+            _gen_scoped_stream_method!(mod, failed, where_IO_var, m, x, incremental)
         end
 
         failed
     end
 end
 
-function _gen_scoped_stream_method!(failed::Vector{Pair{Method, String}}, where_IO_var::Dict{String,String}, m::Method, x::Int, incremental::Bool=true)
+function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, String}}, where_IO_var::Dict{String,String}, m::Method, x::Int, incremental::Bool=true)
     # https://github.com/JuliaLang/julia/blob/v1.11.6/base/methodshow.jl#L80
 
     # Construct "$left $where_expr = $right" like:
@@ -353,7 +354,7 @@ function _gen_scoped_stream_method!(failed::Vector{Pair{Method, String}}, where_
     modul_sym = nameof(modul)
     
     if !isdefined(@__MODULE__, modul_sym)
-        eval(:(const $(modul_sym) = $modul))  # make sure modul is accessible in this module, but do not use `using` or `import` because they have strict rules
+        Core.eval(mod, :(const $(modul_sym) = $modul))  # make sure modul is accessible in this module, but do not use `using` or `import` because they have strict rules
     end
 
     if incremental && (m in IO_METHODS_GENERATED)
@@ -419,7 +420,7 @@ function _gen_scoped_stream_method!(failed::Vector{Pair{Method, String}}, where_
         str = "$left $where_expr $missing_where= $right"
         
         try
-            eval(Meta.parse(str))
+            Core.eval(mod, Meta.parse(str))
             @debug "[$x]\t$str"
         catch e
             @debug "[$x]\t$str" exception=e  # COV_EXCL_LINE
