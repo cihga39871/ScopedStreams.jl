@@ -511,9 +511,9 @@ function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, Str
 end
 
 function has_same_method(func, type_union)
+    sig_type = Base.signature_type(func, type_union)
     candidate_methods = methods(func, type_union)
     for candidate_method in candidate_methods
-        sig_type = Base.signature_type(func, type_union)
         if candidate_method.sig == sig_type
             return true
         end
