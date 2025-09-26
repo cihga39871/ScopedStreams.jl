@@ -309,6 +309,8 @@ Create a `__ScopedStreamsTmp` module under the current module if not exist. In `
 
 - `incremental::Bool=true`: only generate methods for newly defined methods for `IO` since last call. If `false`, regenerate all methods for `IO`.
 
+It does not overwrite existing methods, no matter `incremental` is true or false.
+
 ## What will be generated?
 
 ```julia
@@ -337,6 +339,8 @@ end
 In `mod::Module`, generate methods for `ScopedStream` from all existing methods with `IO`. 
 
 - `incremental::Bool=true`: only generate methods for newly defined methods for `IO` since last call. If `false`, regenerate all methods for `IO`.
+
+It does not overwrite existing methods, no matter `incremental` is true or false.
 
 ## What will be generated?
 
@@ -420,10 +424,14 @@ function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, Str
 
     idx_alters_and_missing_where = decls_multiple_io(decls_2end, where_IO_var)
     func_name = decls[1][2]
+    full_func_name = string(modul_str, ".", func_name)
+    func = Core.eval(mod, Meta.parse(full_func_name))
     for (idx_alter, missing_where) in idx_alters_and_missing_where
-        left = string(modul_str, ".", func_name, "(")
+        left = string(full_func_name, "(")
         right = left
+        type_str = "Tuple{"
         @inbounds for (i,d) in enumerate(decls_2end)
+            # d is (var, type::String); var can be var...
             if d[1] == ""
                 d = ("__var_$i", d[2])
             end
@@ -435,6 +443,8 @@ function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, Str
                     right *= "ScopedStreams.deref("
                     right *= d[1]
                     right *= ")"
+
+                    type_str *= "ScopedStreams.ScopedStream"
                 else
                     left *= d[1]
                     left *= "::"
@@ -442,16 +452,29 @@ function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, Str
 
                     right *= d[1]
                     if endswith(d[2], "...")
+                        # Base.replace(io::ScopedStreams.ScopedStream, s::AbstractString, pat_f::Pair...)
                         right *= "..."
+                    end
+
+                    if endswith(d[2], "...")
+                        type_str *= "Vararg{"
+                        type_str *= d[2][1:end-3]
+                        type_str *= "}"
+                    elseif endswith(d[1], "...")
+                        type_str *= "Vararg{Any}"
+                    else
+                        type_str *= d[2]
                     end
                 end
             else
                 left *= d[1]
                 right *= d[1]
+                type_str *= "Any"
             end
             if i < length(decls) - 1
                 left  *= ", "
                 right *= ", "
+                type_str *= ", "
             end
         end
 
@@ -464,6 +487,16 @@ function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, Str
         left  *= ")"
         right *= ")"
 
+        type_str *= "} "
+        type_str *= where_expr 
+        type_str *= " " 
+        type_str *= missing_where 
+        # @show m
+        # @show "hasmethod($full_func_name, $type_str)"
+
+        type_union = Core.eval(mod, Meta.parse(type_str))
+        has_same_method(func, type_union) && continue  # already has the method
+
         str = "$left $where_expr $missing_where= $right"
         
         try
@@ -475,6 +508,17 @@ function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, Str
         end
     end
     return
+end
+
+function has_same_method(func, type_union)
+    candidate_methods = methods(func, type_union)
+    for candidate_method in candidate_methods
+        sig_type = Base.signature_type(func, type_union)
+        if candidate_method.sig == sig_type
+            return true
+        end
+    end
+    return false
 end
 
 """
@@ -523,13 +567,29 @@ function get_where_exprs!(where_IO_var::Dict{String,String}, m::Method)
     where_expr
 end
 
+"""
+    union_str_has_IO(t::String)
+Check whether IO in `t` like Union{RawFD, Base.FileRedirect, IO}.
+"""
+function union_str_has_IO(t::String)
+    if startswith(t, "Union{") && endswith(t, "}")
+        s = split(t[7:end-1], r", +")
+        for si in s
+            if si == "IO"
+                return true
+            end
+        end
+    end
+    return false
+end
+
 function decls_multiple_io(decls, where_IO_var::Dict{String, String})
 
     index_IOs = Vector{Int}[]  # Same idx of decls == T<:IO belongs to one Int[], each IO belongs to a seperate Int[]
     where_IO_inds = Dict{String, Vector{Int}}(k=>Int[] for k in keys(where_IO_var))
     for (i,decl) in enumerate(decls)
         t = decl[2]  # type in string
-        if t == "IO"
+        if t == "IO" || union_str_has_IO(t) # IO or something like Union{RawFD, Base.FileRedirect, IO}
             push!(index_IOs, [i])
         else
             inds = get(where_IO_inds, t, nothing)

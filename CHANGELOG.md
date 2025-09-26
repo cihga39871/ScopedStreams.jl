@@ -1,5 +1,9 @@
 # CHANGE LOG
 
+### v0.3.4
+
+- Feat: `_gen_scoped_stream_method!`: do not overwrite a method if the method exists. This fix precompilation warning or error.
+
 ### v0.3.3
 
 - Compat: fix a weird case in julia v1.8.5: some vars is in `names(mod)`, but mod does not defined.
