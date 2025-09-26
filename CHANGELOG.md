@@ -1,5 +1,9 @@
 # CHANGE LOG
 
+### v0.3.5
+
+- Optim: `has_same_method`: no need to re-compute sig type.
+
 ### v0.3.4
 
 - Feat: `_gen_scoped_stream_method!`: do not overwrite a method if the method exists. This fix precompilation warning or error.
