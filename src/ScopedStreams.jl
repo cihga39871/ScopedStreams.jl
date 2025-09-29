@@ -469,7 +469,11 @@ function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, Str
             else
                 left *= d[1]
                 right *= d[1]
-                type_str *= "Any"
+                if endswith(d[1], "...")
+                    type_str *= "Vararg{Any}"
+                else
+                    type_str *= "Any"
+                end
             end
             if i < length(decls) - 1
                 left  *= ", "

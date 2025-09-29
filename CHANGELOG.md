@@ -1,5 +1,9 @@
 # CHANGE LOG
 
+### v0.3.6
+
+- Fix: `_gen_scoped_stream_method!`: Type of `c...` in  `f(a,b, c...)` not correctly determined. It should be `Vararg{Any}` but the old version use `Any`.
+
 ### v0.3.5
 
 - Optim: `has_same_method`: no need to re-compute sig type.
