@@ -8,17 +8,22 @@ This ensures safe, concurrent I/O operations, enhancing reliability and performa
 
 ## Usage
 
-### Recommended to load this package after other modules.
+### `@gen_scoped_stream_methods`
+
+This macro creates methods that support the scope-dependent IO, `ScopedStream`, based on the existing imported and defined methods with `IO`.
+
+It is recommended to use it after loading all modules and defining all methods with IO in their arguments.
 
 ```julia
-using Dates
-using XXX
-using ScopedStreams  # load at last
+using OtherModule1, OtherModule2, ...
+using ScopedStreams
+
+@gen_scoped_stream_methods  # Recommended to use it after loading all modules
 ```
 
 ### Main function to redirect stdout, stderr, and logger
 
-`redirect_stream` is the main function of the package. It allows each multi-threaded task to have its own isolated standard output and error streams. 
+`redirect_stream` is the main function of the package. It allows each multi-threaded task to have its own isolated standard output and error streams.
 
 ```julia
 redirect_stream(f::Function, out; mode="a+")
@@ -33,11 +38,13 @@ redirect_stream(f::Function, out, err, log; mode="a+")
 - `mode`: same as `open(..., mode)`. Only used for `AbstractString` positional arguments.
 
 #### Tips
+
 - Do not mess up this function with Base methods `redirect_stdout`, `redirect_stderr`, and `redirect_stdio` because the Base methods are **not thread-safe**, and calling them will mess up `redirect_stream` redirection.
 - If passing an `IO` or `AbstractLogger`, it won't be closed. Please use `close(io)` or `JobSchedulers.close_in_future(io, jobs)` manually.
 - Do not pass two/three distinct descriptors of the same file to `out`, `err` and `log`. See **Edge cases**.
 
 #### Examples
+
 ```julia
 using ScopedStreams, Dates
 
@@ -120,7 +127,6 @@ end
 
 ## API
 
-
 ```julia
 ScopedStream(io::IO)
 ScopedStream(io::ScopedStream)
@@ -128,26 +134,25 @@ ScopedStream(io::ScopedStream)
 deref(io::ScopedStream)
 deref(io)
 
-redirect_stream(f::Function, out; mode="a+")
-redirect_stream(f::Function, out, err; mode="a+")
-redirect_stream(f::Function, out, err, log; mode="a+")
-
 @gen_scoped_stream_methods
 ScopedStreams.gen_scoped_stream_methods(incremental=true; mod=@__MODULE__)
 
 ScopedStreams.__init__()
 
+redirect_stream(f::Function, out; mode="a+")
+redirect_stream(f::Function, out, err; mode="a+")
+redirect_stream(f::Function, out, err, log; mode="a+")
+
 restore_stream()
 ```
-
 
 ## Troubleshooting and known issues
 
 ### 1. When you see an IO-related warning or error
 
-To troubleshoot this error, please check the following:
+To troubleshoot it, please check the following:
 
-- Did you define new functions related to `IO`, or use other modules after loading `ScopedStreams`? It is recommended to load the package at the end. If it is not possible, please manually call `@gen_scoped_stream_methods` to generate specialized ScopeStream methods for the newly defined IO-related functions in your module.
+- Did you define new functions related to `IO`, or use other modules after loading `ScopedStreams`? It is recommended to call `@gen_scoped_stream_methods` to generate specialized `ScopeStream` methods for the newly defined IO-related functions in your module.
 - Did you or some packages use `redirect_stdout`, `redirect_stderr` or `redirect_stdio`? Please avoid using those functions because they are not compatible with the thread-safe `redirect_stream`.
 
 ### 2. This package is not compatible with `julia -E 'expr'`. Eg:
@@ -179,25 +184,22 @@ julia -E "using ScopedStreams; restore_stream(); 123"
 
 1. New methods are generated for `ScopedStream` based on the currently-defined methods with `IO` using `gen_scoped_stream_methods(incremental=true)`. You can check the new methods:
 
-    ```julia
-    julia> methodswith(ScopedStream)[1:5]
-    [1] IOContext(io::ScopedStream, context::ScopedStream) @ ScopedStreams none:1
-    [2] IOContext(io::ScopedStream) @ ScopedStreams none:1
-    [3] IOContext(io::ScopedStream, dict::Base.ImmutableDict{Symbol, Any}) @ ScopedStreams none:1
-    [4] IOContext(io::ScopedStream, context::IO) @ ScopedStreams none:1
-    [5] IOContext(io::IO, context::ScopedStream) @ ScopedStreams none:1
-    ```
-
-    `ScopedStream` is a wrapper of `ScopedValue{IO}`, but belongs to `IO` abstract type, so any call with `IO` now has specialized methods for `ScopedStream`.
-
+   ```julia
+   julia> methodswith(ScopedStream)[1:5]
+   [1] IOContext(io::ScopedStream, context::ScopedStream) @ ScopedStreams none:1
+   [2] IOContext(io::ScopedStream) @ ScopedStreams none:1
+   [3] IOContext(io::ScopedStream, dict::Base.ImmutableDict{Symbol, Any}) @ ScopedStreams none:1
+   [4] IOContext(io::ScopedStream, context::IO) @ ScopedStreams none:1
+   [5] IOContext(io::IO, context::ScopedStream) @ ScopedStreams none:1
+   ```
+   `ScopedStream` is a wrapper of `ScopedValue{IO}`, but belongs to `IO` abstract type, so any call with `IO` now has specialized methods for `ScopedStream`.
 2. After that, backup the original stdout and stderr to `ScopedStreams.stdout_origin` and `ScopedStreams.stderr_origin`.
-
 3. Finally, wrap stdout and stderr to `ScopedStream`. You can check it using the following code:
 
-    ```julia
-    julia> stdout
-    ScopedStream(Base.ScopedValues.ScopedValue{IO}(Base.TTY(RawFD(17) open, 0 bytes waiting)))
+   ```julia
+   julia> stdout
+   ScopedStream(Base.ScopedValues.ScopedValue{IO}(Base.TTY(RawFD(17) open, 0 bytes waiting)))
 
-    julia> stderr
-    ScopedStream(Base.ScopedValues.ScopedValue{IO}(Base.TTY(RawFD(19) open, 0 bytes waiting)))
-    ```
+   julia> stderr
+   ScopedStream(Base.ScopedValues.ScopedValue{IO}(Base.TTY(RawFD(19) open, 0 bytes waiting)))
+   ```
