@@ -162,11 +162,20 @@ function redirect_stream(f::Function, outfile, errfile, logfile; mode="a+")
             this_with_logger(f, log)
         end
     catch ex
-        if typeof(ex) === ErrorException && endswith(ex.msg, "has no field ref")
-            @warn("Fallback to default stdout and stderr because they are not thread-safe at this time. It is caused by function call of `Base.redirect_std***`. \nTo fix it, please run `ScopedStreams.__init__()` manually.")
-            this_with_logger(f, log)
+        @static if isdefined(Base, :FieldError)  # julia v1.12 new Error type
+            if typeof(ex) === FieldError && ex.field === :ref
+                @warn("Fallback to default stdout and stderr because they are not thread-safe at this time. It is caused by function call of `Base.redirect_std***`. \nTo fix it, please run `ScopedStreams.__init__()` manually.")
+                this_with_logger(f, log)
+            else
+                rethrow(ex)
+            end
         else
-            rethrow(ex)
+            if typeof(ex) === ErrorException && endswith(ex.msg, "has no field ref")
+                @warn("Fallback to default stdout and stderr because they are not thread-safe at this time. It is caused by function call of `Base.redirect_std***`. \nTo fix it, please run `ScopedStreams.__init__()` manually.")
+                this_with_logger(f, log)
+            else
+                rethrow(ex)
+            end
         end
     finally
         # close or flush or do nothing
