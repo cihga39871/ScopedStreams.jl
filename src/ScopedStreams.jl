@@ -301,7 +301,7 @@ end
 
 
 ########### Generate IO Methods ###########
-
+# module __ScopedStreamsTmp end
 """
     @gen_scoped_stream_methods(incremental::Bool=true)
 
@@ -324,14 +324,27 @@ Base.write(io::ScopedStream, x::UInt8) = Base.write(deref(io), x)
 See also: [`ScopedStreams.gen_scoped_stream_methods`](@ref).
 """
 macro gen_scoped_stream_methods(incremental=true)
-    esc(quote
-        if !isdefined($__module__, :__ScopedStreamsTmp)
-            Core.eval($__module__, :(module __ScopedStreamsTmp end))
-        end
-        ScopedStreams.gen_scoped_stream_methods($incremental; mod=$__module__.__ScopedStreamsTmp)
-    end)
-end
+    # Core.@latestworld: temporary increase world age
+    # to work around the new world age restriction introduced in julia v1.12
+    @static if isdefined(Core, Symbol("@latestworld"))
+        esc(quote
+            ScopedStreams.gen_tmp_module_if_not_exist($__module__)
+            Core.@latestworld
+            ScopedStreams.gen_scoped_stream_methods($incremental; mod=getproperty($__module__, :__ScopedStreamsTmp))
+        end)
+    else
+        esc(quote
+            ScopedStreams.gen_tmp_module_if_not_exist($__module__)
+            ScopedStreams.gen_scoped_stream_methods($incremental; mod=getproperty($__module__, :__ScopedStreamsTmp))
+        end)
+    end
+end 
 
+function gen_tmp_module_if_not_exist(under::Module)
+    if !isdefined(under, :__ScopedStreamsTmp)
+        Core.eval(under, :(module __ScopedStreamsTmp end))
+    end
+end
 
 """
     gen_scoped_stream_methods(incremental::Bool=true; mod=@__MODULE__)
@@ -386,6 +399,9 @@ function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, Str
 
     # Construct "$left $where_expr = $right" like:
     # Modul.func(io::ScopedStream, a::T, b; kw...) where T = Modul.func(deref(io), a, b; kw...)
+
+    @debug "[$x] $m"
+
 
     modul = m.module
 
@@ -505,9 +521,9 @@ function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, Str
         
         try
             Core.eval(mod, Meta.parse(str))
-            @debug "[$x]\t$str"
+            @debug "    →  $str"
         catch e
-            @debug "[$x]\t$str" exception=e  # COV_EXCL_LINE
+            @debug "    →  $str" exception=e  # COV_EXCL_LINE
             push!(failed, m=>str)            # COV_EXCL_LINE
         end
     end
@@ -661,6 +677,8 @@ end
     psuedo_import_module_and_types(modul::Module, to::Module)
 
 Make `modul::Module` and its exported `Type`s available in `to::Module`. If the symbol of modul is defined in `to`, do nothing.
+
+If `modul` is not defined, and it has parent modules, all its parent modules are exported.
 """
 function psuedo_import_module_and_types(modul::Module, to::Module)
     modul_sym = nameof(modul)
@@ -677,9 +695,14 @@ function psuedo_import_module_and_types(modul::Module, to::Module)
                 Core.eval(to, :($(name) = $var))
             end
         end
+        parent_modul = parentmodule(modul)
+        if parent_modul === modul || parent_modul === Base || parent_modul === Core
+            return
+        end
+        psuedo_import_module_and_types(parent_modul, to)
     end
 end
 
-gen_scoped_stream_methods(true)
+@gen_scoped_stream_methods
 
 end # module ScopedStreams

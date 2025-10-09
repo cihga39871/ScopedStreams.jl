@@ -1,5 +1,10 @@
 # CHANGE LOG
 
+### v0.3.7
+
+- Compat: julia v1.12.0: `@gen_scoped_stream_methods`: call `Core.@latestworld` after defining the temp module to work around the new world age restriction.
+- Feat: `psuedo_import_module_and_types`: recursively import parent module.
+
 ### v0.3.6
 
 - Fix: `_gen_scoped_stream_method!`: Type of `c...` in  `f(a,b, c...)` not correctly determined. It should be `Vararg{Any}` but the old version use `Any`.
