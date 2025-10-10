@@ -5,6 +5,7 @@
 - Compat: julia v1.12.0: `@gen_scoped_stream_methods`: call `Core.@latestworld` after defining the temp module to work around the new world age restriction.
 - Feat: `psuedo_import_module_and_types`: recursively import parent module.
 - Compat: julia v1.12.0: `FieldError` in `redirect_stream`.
+- Test: more code coverage.
 
 ### v0.3.6
 

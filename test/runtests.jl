@@ -17,9 +17,28 @@ using ScopedStreams
         end
     end
 
-    fullios(x::IO, y::IO, z::IOT, u::IOT, v::IOK, w::T) where IOT <: IO where IOK <: Union{IO, Nothing} where T = println(x,y,z,u,v,w)
-    m = methods(fullios)[1]
+    @test !isdefined(@__MODULE__, :__ScopedStreamsTmp)
+    ScopedStreams.gen_tmp_module_if_not_exist(@__MODULE__)
+    @test isdefined(@__MODULE__, :__ScopedStreamsTmp)
 
+
+    fullios(x::IO, y::IO, z::IOT, u::IOT, v::IOK, w::T) where IOT <: IO where IOK <: Union{IO, Nothing} where T = println(x,y,z,u,v,w)
+    funcvarargs(x::IO, y...) = println(x, y...)
+    
+    # test decls_multiple_io
+    m = methods(+)[1]
+    tv, decls, file, line = Base.arg_decl_parts(m)
+    ret = ScopedStreams.decls_multiple_io(decls, Dict{String,String}()) 
+
+    m2 = methods(fullios)[1]
+    where_IO_var = Dict{String,String}()
+    tv, decls2, file, line = Base.arg_decl_parts(m2)
+    where_expr = ScopedStreams.get_where_exprs!(where_IO_var, m2)
+    ret2 = ScopedStreams.decls_multiple_io(decls2, where_IO_var)
+    @test typeof(ret2) == typeof(ret)
+    @test ret2[1] == ([2] => "where IOT<:IO where IOK<:Union{Nothing, IO} ")
+
+    # test global
     @test Base.stdout isa ScopedStream
     @test Base.stderr isa ScopedStream
 

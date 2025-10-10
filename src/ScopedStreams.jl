@@ -162,7 +162,7 @@ function redirect_stream(f::Function, outfile, errfile, logfile; mode="a+")
             this_with_logger(f, log)
         end
     catch ex
-        @static if isdefined(Base, :FieldError)  # julia v1.12 new Error type
+        @static if isdefined(Base, :FieldError)  # julia v1.12 new Error type # COV_EXCL_LINE
             if typeof(ex) === FieldError && ex.field === :ref
                 @warn("Fallback to default stdout and stderr because they are not thread-safe at this time. It is caused by function call of `Base.redirect_std***`. \nTo fix it, please run `ScopedStreams.__init__()` manually.")
                 this_with_logger(f, log)
@@ -411,7 +411,6 @@ function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, Str
 
     @debug "[$x] $m"
 
-
     modul = m.module
 
     # make sure modul and its public types is accessible in this module, but do not use `using` or `import` because they have strict rules
@@ -424,7 +423,7 @@ function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, Str
     modul_str = string(modul)
 
     if incremental && (m in IO_METHODS_GENERATED)
-        return
+        return  # COV_EXCL_LINE
     else
         push!(IO_METHODS_GENERATED, m)
     end
@@ -697,7 +696,7 @@ function psuedo_import_module_and_types(modul::Module, to::Module)
         ns = names(modul)
         for name in ns
             if !isdefined(modul, name)  # happens in some weird cases in julia v1.8.5
-                continue
+                continue  # COV_EXCL_LINE
             end
             var = getproperty(modul, name)
             if var isa Type && !isdefined(to, name)
