@@ -38,6 +38,12 @@ using ScopedStreams
     @test typeof(ret2) == typeof(ret)
     @test ret2[1] == ([2] => "where IOT<:IO where IOK<:Union{Nothing, IO} ")
 
+    m3 = methods(funcvarargs)[1]
+    where_IO_var = Dict{String,String}()
+    tv, decls3, file, line = Base.arg_decl_parts(m3)
+    where_expr = ScopedStreams.get_where_exprs!(where_IO_var, m3)
+    ret3 = ScopedStreams.decls_multiple_io(decls3, where_IO_var)
+
     # test global
     @test Base.stdout isa ScopedStream
     @test Base.stderr isa ScopedStream
