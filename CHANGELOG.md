@@ -1,5 +1,9 @@
 # CHANGE LOG
 
+### v0.3.8
+
+- Feat: add specific IO methods defined in Base for ScopedStreams.
+
 ### v0.3.7
 
 - Compat: julia v1.12.0: `@gen_scoped_stream_methods`: call `Core.@latestworld` after defining the temp module to work around the new world age restriction.

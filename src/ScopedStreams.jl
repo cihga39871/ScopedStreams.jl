@@ -250,6 +250,8 @@ function restore_stream()
     end
 end
 
+########### Basic IO methods ###########
+
 """
     (f::Base.RedirectStdStream)(io::Any)
     (f::Base.RedirectStdStream)(io::ScopedStream) = f(deref(io))
@@ -260,6 +262,43 @@ function (f::Base.RedirectStdStream)(io::ScopedStream)
     f(deref(io))
     Base._redirect_io_global(io, f.unix_fd)
 end
+
+Base.close(s::ScopedStream) = close(deref(s))
+Base.closewrite(s::ScopedStream) = closewrite(deref(s))
+Base.wait_close(s::ScopedStream) = wait_close(deref(s))
+Base.flush(s::ScopedStream) = flush(deref(s))
+Base.position(s::ScopedStream) = position(deref(s))
+
+Base.peek(s::ScopedStream, ::Type{T}) where T = peek(deref(s), T)
+Base.peek(s::ScopedStream) = peek(deref(s), UInt8)
+Base.seek(s::ScopedStream, pos::Integer) = seek(deref(s), pos)
+Base.seek(s::ScopedStream, pos::Int64) = seek(deref(s), pos)
+Base.seekend(s::ScopedStream) = seekend(deref(s))
+Base.skip(s::ScopedStream, n::Integer) = skip(deref(s), n)
+Base.skip(s::ScopedStream, n::Int64) = skip(deref(s), n)
+Base.skip(s::ScopedStream, n) = skip(deref(s), Int(n))
+Base.truncate(s::ScopedStream, n::Integer) = truncate(deref(s), n)
+
+Base.eof(s::ScopedStream) = eof(deref(s))
+Base.isopen(s::ScopedStream) = isopen(deref(s))
+Base.mark(s::ScopedStream) = mark(deref(s))
+Base.unmark(s::ScopedStream) = unmark(deref(s))
+Base.reset(s::ScopedStream) = reset(deref(s))
+Base.ismarked(s::ScopedStream) = ismarked(deref(s))
+Base.read(s::ScopedStream) = read(deref(s))
+Base.readavailable(s::ScopedStream) = readavailable(deref(s))
+Base.reseteof(s::ScopedStream) = reseteof(deref(s))
+Base.isreadable(s::ScopedStream) = isreadable(deref(s))
+Base.isreadonly(s::ScopedStream) = isreadonly(deref(s))
+Base.iswritable(s::ScopedStream) = iswritable(deref(s))
+Base.readchomp(s::ScopedStream) = readchomp(deref(s))
+Base.readlines(s::ScopedStream; kw...) = readlines(deref(s); kw...)
+
+Base.bytesavailable(s::ScopedStream) = bytesavailable(deref(s))
+Base.ntoh(s::ScopedStream) = ntoh(deref(s))
+Base.hton(s::ScopedStream) = hton(deref(s))
+Base.ltoh(s::ScopedStream) = ltoh(deref(s))
+Base.htol(s::ScopedStream) = htol(deref(s))
 
 ########### Initialization ###########
 
