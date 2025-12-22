@@ -486,8 +486,16 @@ function _gen_scoped_stream_method!(mod::Module, failed::Vector{Pair{Method, Str
     decls_2end = @view decls[2:end]
 
     idx_alters_and_missing_where = decls_multiple_io(decls_2end, where_IO_var)
+    
     func_name = decls[1][2]
+    # if func_name is "(func)", change it to "func"
+    if startswith(func_name, "(") && endswith(func_name, ")")
+        func_name = func_name[2:end-1]
+        decls[1][2] = func_name
+    end
+
     full_func_name = string(modul_str, ".", func_name)
+
     func = Core.eval(mod, Meta.parse(full_func_name))
     for (idx_alter, missing_where) in idx_alters_and_missing_where
         left = string(full_func_name, "(")

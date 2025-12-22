@@ -1,5 +1,9 @@
 # CHANGE LOG
 
+### v0.3.9
+
+- Fix: some function name is wrapped in `()`, which makes eval fail. Delete `()` in function name.
+
 ### v0.3.8
 
 - Feat: add specific IO methods defined in Base for ScopedStreams.
