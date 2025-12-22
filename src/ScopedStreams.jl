@@ -435,7 +435,12 @@ function gen_scoped_stream_methods(incremental::Bool=true; mod=@__MODULE__)
         where_IO_var = Dict{String,String}()  # like ("IOT" => "where IOT<:IO")
 
         for (x, m) in enumerate(ms)
-            _gen_scoped_stream_method!(mod, failed, where_IO_var, m, x, incremental)
+            try
+                _gen_scoped_stream_method!(mod, failed, where_IO_var, m, x, incremental)
+            catch e
+                @debug "    →  $m" exception=e  # COV_EXCL_LINE
+                push!(failed, m=>"$m")            # COV_EXCL_LINE
+            end
         end
 
         failed
