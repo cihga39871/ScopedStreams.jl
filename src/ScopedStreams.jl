@@ -269,16 +269,15 @@ handle_open_log(file::AbstractString, mode) = open(file::AbstractString, mode)
 
 handle_open_log(logger::AbstractLogger, mode) = logger
 
+# COV_EXCL_START
 @static if isdefined(ScopedValues, :with_logger)
     # before v1.11, ScopedValues.with_logger used to replace Logging.with_logger
-    # COV_EXCL_START
     ScopedValues.with_logger(f::Function, logger::Nothing) = f()
     function ScopedValues.with_logger(f::Function, io::IO)
         logger = SimpleLogger(io)
         ScopedValues.with_logger(f, logger)
     end
     const this_with_logger = ScopedValues.with_logger
-    # COV_EXCL_STOP
 else
     Logging.with_logger(f::Function, logger::Nothing) = f()
     function Logging.with_logger(f::Function, io::IO)
@@ -287,6 +286,7 @@ else
     end
     const this_with_logger = Logging.with_logger
 end
+# COV_EXCL_STOP
 
 handle_finally(file::Nothing, io) = nothing  # COV_EXCL_LINE
 handle_finally(file::IO, io) = flush(io)
@@ -322,6 +322,7 @@ function (f::Base.RedirectStdStream)(io::ScopedStream)
     Base._redirect_io_global(io, f.unix_fd)
 end
 
+# COV_EXCL_START
 Base.close(s::ScopedStream) = close(deref(s))
 Base.closewrite(s::ScopedStream) = closewrite(deref(s))
 Base.wait_close(s::ScopedStream) = wait_close(deref(s))
@@ -358,6 +359,7 @@ Base.ntoh(s::ScopedStream) = ntoh(deref(s))
 Base.hton(s::ScopedStream) = hton(deref(s))
 Base.ltoh(s::ScopedStream) = ltoh(deref(s))
 Base.htol(s::ScopedStream) = htol(deref(s))
+# COV_EXCL_STOP
 
 ########### Initialization ###########
 

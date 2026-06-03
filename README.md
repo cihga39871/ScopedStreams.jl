@@ -128,21 +128,33 @@ end
 ## API
 
 ```julia
-ScopedStream(io::IO)
-ScopedStream(io::ScopedStream)
+# struct
+ScopedStream(io::IO) -> ScopedStream
+ScopedStream(io::ScopedStream) = io
 
-deref(io::ScopedStream)
-deref(io)
+# get the actual IO without the ScopedStream wrapper
+deref(io::ScopedStream) -> IO
+deref(io) = io
 
-@gen_scoped_stream_methods
-ScopedStreams.gen_scoped_stream_methods(incremental=true; mod=@__MODULE__)
-
-ScopedStreams.__init__()
-
+# thread-safe stdout, stderr and log redirection
 redirect_stream(f::Function, out; mode="a+")
 redirect_stream(f::Function, out, err; mode="a+")
 redirect_stream(f::Function, out, err, log; mode="a+")
 
+# change the default streams for **all scopes that do not define scope-specific streams**.
+set_default_stdout(io::IO)
+set_default_stderr(io::IO)
+reset_default_stdout()
+reset_default_stderr()
+
+# automatically generate methods for IO-related functions
+@gen_scoped_stream_methods
+ScopedStreams.gen_scoped_stream_methods(incremental=true; mod=@__MODULE__)
+
+# init the module (automatically called when loading)
+ScopedStreams.__init__()
+
+# reverse stdout & stderr to the non-scoped streams
 restore_stream()
 ```
 
