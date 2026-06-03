@@ -1,8 +1,17 @@
 # CHANGE LOG
 
+### v1.0.0
+
+- Breaking: `stdout_origin` and `stderr_origin` are now `const Ref{IO}` instead of plain variables; access them as `stdout_origin[]` / `stderr_origin[]`.
+- Feat: new `const stdout_default` and `const stderr_default` (`Ref{IO}`) — the global fallback streams used by `deref` when no scope overrides them.
+- Feat: new exported functions `set_default_stdout(io)`, `set_default_stderr(io)`, `reset_default_stdout()`, `reset_default_stderr()` to change or restore the global default streams at runtime.
+- Feat: `deref(io::ScopedStream)` now returns `stdout_default[]` / `stderr_default[]` when the scoped value equals the original stream, enabling a global-level redirection that tasks without an explicit scope will follow.
+- Delete: Extention module `SSTestExt`: no need.
+
 ### v0.3.9
 
-- Fix: some function name is wrapped in `()`, which makes eval fail. Delete `()` in function name.
+- Fix: `_gen_scoped_stream_method!`: `decls[1]` is an immutable `Tuple` and cannot be mutated by index; rebuild the tuple instead of assigning to `decls[1][2]`.
+- Fix: `gen_scoped_stream_methods`: wrap each `_gen_scoped_stream_method!` call in `try/catch` so a single failing method is recorded in `failed` without aborting the rest of method generation.
 
 ### v0.3.8
 

@@ -6,18 +6,9 @@ import InteractiveUtils: methodswith
 
 export ScopedStream, deref, @gen_scoped_stream_methods, redirect_stream, restore_stream
 
-########### Globals ###########
+export set_default_stdout, set_default_stderr, reset_default_stdout, reset_default_stderr
 
-stdout_origin = nothing  # re-defined in __init__()
-stderr_origin = nothing  # re-defined in __init__()
-
-const INIT_LOCK = ReentrantLock()
-
-const ID_ALTERS_COMPUTED = Dict{Int, Vector{Vector{Int64}}}()
-const IO_METHODS_GENERATED = Set{Method}()
-sizehint!(IO_METHODS_GENERATED, 1000)
-
-########### ScopedStream ###########
+########### ScopedStream Struct ###########
 
 """
     struct ScopedStream <: IO
@@ -38,14 +29,82 @@ end
 ScopedStream(io::ScopedStream) = io
 ScopedStream(io::IO) = ScopedStream(ScopedValue{IO}(io))
 
+########### Globals ###########
+
 """
-    deref(io::ScopedStream) = io.ref[]
+    const stdout_origin = Ref{IO}()
+    const stderr_origin = Ref{IO}()
+
+The original non-scoped `Base.stdout` and `Base.stderr` at the time loading `ScopedStreams`. They are used for restoring the original streams (`restore_stream`) when needed.
+"""
+const stdout_origin = Ref{IO}(devnull)  # re-defined in __init__()
+const stderr_origin = Ref{IO}(devnull)  # re-defined in __init__()
+@doc (@doc stdout_origin) stderr_origin
+
+const INIT_LOCK = ReentrantLock()
+
+const ID_ALTERS_COMPUTED = Dict{Int, Vector{Vector{Int64}}}()
+const IO_METHODS_GENERATED = Set{Method}()
+sizehint!(IO_METHODS_GENERATED, 1000)
+
+"""
+    const stdout_default::Ref{IO}
+    const stderr_default::Ref{IO}
+
+The GLOBAL default `IO` for `deref(Base.stdout)` and `deref(Base.stderr)` when the scopes using stdout/stderr do not define standard streams. 
+    
+They are initialized to the original streams at the end of `__init__()`, but can be changed by `set_default_stdout(io)` and `set_default_stderr(io)`, and reset to the original streams by `reset_default_stdout()` and `reset_default_stderr()`.
+"""
+const stdout_default = Ref{IO}(devnull)  # re-defined in __init__()
+const stderr_default = Ref{IO}(devnull)  # re-defined in __init__()
+@doc (@doc stdout_default) stderr_default
+
+"""
+    set_default_stdout(io::IO)
+    set_default_stderr(io::IO)
+    reset_default_stdout()
+    reset_default_stderr()
+
+Those functions can be used to change the default stream for all scopes that do not change the original streams.
+
+Set or reset the GLOBAL default `IO` for `deref(Base.stdout)` and `deref(Base.stderr)` when the scopes using stdout/stderr do not define standard streams.
+"""
+function set_default_stdout(io::IO)
+    global stdout_default[] = io isa ScopedStream ? io.ref[] : io
+end
+function set_default_stderr(io::IO)
+    global stderr_default[] = io isa ScopedStream ? io.ref[] : io
+end
+function reset_default_stdout()
+    global stdout_default[] = stdout_origin[]
+end
+function reset_default_stderr()
+    global stderr_default[] = stderr_origin[]
+end
+@doc (@doc set_default_stdout) set_default_stderr
+@doc (@doc set_default_stdout) reset_default_stdout
+@doc (@doc set_default_stdout) reset_default_stderr
+
+
+"""
+    deref(io::ScopedStream) -> IO
     deref(io) = io
 
 Get the actual `IO` from `ScopedStream`, or return the input if it is not a `ScopedStream`.
 """
-@inline deref(io::ScopedStream) = io.ref[]
+@inline function deref(io::ScopedStream)
+    real_io = io.ref[]
+    if real_io === stdout_origin[]
+        return stdout_default[]
+    elseif real_io === stderr_origin[]
+        return stderr_default[]
+    else
+        return real_io
+    end
+end
 @inline deref(io) = io
+
+### functions for redirection using Scope
 
 """
     redirect_stream(f::Function, out; mode="a+")
@@ -237,16 +296,16 @@ handle_finally(file::AbstractLogger, io) = nothing  # COV_EXCL_LINE
 """
     restore_stream()
 
-Reset `Base.stdout` and `Base.stderr` to the original streams at the time loading `ScopedStreams`.
+Reset `Base.stdout` and `Base.stderr` to the original non-scoped streams at the time loading `ScopedStreams`.
 """
 function restore_stream()
     global stdout_origin  # COV_EXCL_LINE
     global stderr_origin  # COV_EXCL_LINE
-    if !isnothing(stdout_origin)
-        redirect_stdout(stdout_origin)
+    if isdefined(stdout_origin, 1)
+        redirect_stdout(stdout_origin[])
     end
-    if !isnothing(stderr_origin)
-        redirect_stderr(stderr_origin)
+    if isdefined(stderr_origin, 1)
+        redirect_stderr(stderr_origin[])
     end
 end
 
@@ -312,37 +371,22 @@ Initializing ScopedStreams:
 function __init__()
     global stdout_origin
     global stderr_origin
+    global stdout_default
+    global stderr_default
 
     lock(INIT_LOCK) do
-        # save original stdxxx to stdxxx_origin
-        if isnothing(stdout_origin)
-            if Base.stdout isa ScopedStream || Base.stdout isa Base.TTY || occursin(r"<fd .*>|RawFD\(\d+\)|WindowsRawSocket\(", string(Base.stdout))
-                nothing
-            else
-                # Not Terminal (TTY), nor linux file redirection (fd)
-                @warn "Base.stdout was changed when initiating ScopedStreams." Base.stdout  # COV_EXCL_LINE
-            end
-            stdout_origin = deref(Base.stdout)
-        end
-        if isnothing(stderr_origin)
-            if Base.stdout isa ScopedStream || Base.stderr isa Base.TTY || occursin(r"<fd .*>|RawFD\(\d+\)|WindowsRawSocket\(", string(Base.stderr))
-                nothing
-            else
-                # Not Terminal (TTY), nor linux file redirection (fd)
-                @warn "Base.stderr was changed when initiating ScopedStreams." Base.stderr  # COV_EXCL_LINE
-            end
-            stderr_origin = deref(Base.stderr)
-        end
+        stdout_origin[] = Base.stdout isa ScopedStream ? Base.stdout.ref[] : Base.stdout
+        stderr_origin[] = Base.stderr isa ScopedStream ? Base.stderr.ref[] : Base.stderr
 
-        # generate methods for ScopedStream
-        # gen_scoped_stream_methods(true)
+        stdout_default[] = stdout_origin[]
+        stderr_default[] = stderr_origin[]
 
         # redirect Base.stdxxx to ScopedStream if not already
         if !(Base.stdout isa ScopedStream)
-            redirect_stdout(ScopedStream(stdout_origin))
+            redirect_stdout(ScopedStream(stdout_origin[]))
         end
         if !(Base.stderr isa ScopedStream)
-            redirect_stderr(ScopedStream(stderr_origin))
+            redirect_stderr(ScopedStream(stderr_origin[]))
         end
     end
 end

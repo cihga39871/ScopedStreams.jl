@@ -55,7 +55,7 @@ using ScopedStreams
     ScopedStreams.gen_scoped_stream_methods(false)
     ScopedStreams.compute_id_alters(5)
 
-    redirect_stdout(ScopedStreams.stdout_origin) do  # test not breaking
+    redirect_stdout(ScopedStreams.stdout_origin[]) do  # test not breaking
         f("normal stdout", 1)
     end
 
@@ -131,5 +131,54 @@ using ScopedStreams
         println("no redirection")
     end
     
+    ##### change global streams under other scopes
+    @testset "change global streams under other scopes" begin
+        global_out = IOBuffer()
+        global_err = IOBuffer()
+
+        local_out = IOBuffer()
+        local_err = IOBuffer()
+
+        task_global = @task begin
+            println(Base.stdout, "global_stream_func: stdout")
+            println(Base.stderr, "global_stream_func: stderr")
+        end
+
+        redirect_stream(local_out, local_err) do
+
+            set_default_stdout(global_out)
+            set_default_stderr(global_err)
+
+            schedule(task_global)
+            wait(task_global)
+
+            @test deref(Base.stdout) === local_out
+            @test deref(Base.stderr) === local_err
+
+            println(Base.stdout, "local_stream_func: stdout")
+            println(Base.stderr, "local_stream_func: stderr")
+        end
+
+        @test deref(Base.stdout) === global_out
+        @test deref(Base.stderr) === global_err
+        @test Base.stdout.ref[] !== global_out
+        @test Base.stderr.ref[] !== global_err
+
+        global_out_text = String(take!(global_out))
+        global_err_text = String(take!(global_err))
+        local_out_text = String(take!(local_out))
+        local_err_text = String(take!(local_err))
+
+        @test occursin("global_stream_func: stdout", global_out_text)
+        @test occursin("global_stream_func: stderr", global_err_text)
+        @test occursin("local_stream_func: stdout", local_out_text)
+        @test occursin("local_stream_func: stderr", local_err_text)
+
+        reset_default_stdout()
+        reset_default_stderr()
+        @test deref(Base.stdout) === ScopedStreams.stdout_origin[]
+        @test deref(Base.stderr) === ScopedStreams.stderr_origin[]
+    end
+
     restore_stream()
 end
