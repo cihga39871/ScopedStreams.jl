@@ -269,8 +269,8 @@ handle_open_log(file::AbstractString, mode) = open(file::AbstractString, mode)
 
 handle_open_log(logger::AbstractLogger, mode) = logger
 
-# COV_EXCL_START
 @static if isdefined(ScopedValues, :with_logger)
+    # COV_EXCL_START
     # before v1.11, ScopedValues.with_logger used to replace Logging.with_logger
     ScopedValues.with_logger(f::Function, logger::Nothing) = f()
     function ScopedValues.with_logger(f::Function, io::IO)
@@ -278,15 +278,17 @@ handle_open_log(logger::AbstractLogger, mode) = logger
         ScopedValues.with_logger(f, logger)
     end
     const this_with_logger = ScopedValues.with_logger
+    # COV_EXCL_STOP
 else
+    # COV_EXCL_START
     Logging.with_logger(f::Function, logger::Nothing) = f()
     function Logging.with_logger(f::Function, io::IO)
         logger = SimpleLogger(io)
         Logging.with_logger(f, logger)
     end
     const this_with_logger = Logging.with_logger
+    # COV_EXCL_STOP
 end
-# COV_EXCL_STOP
 
 handle_finally(file::Nothing, io) = nothing  # COV_EXCL_LINE
 handle_finally(file::IO, io) = flush(io)
