@@ -180,5 +180,31 @@ using ScopedStreams
         @test deref(Base.stderr) === ScopedStreams.stderr_origin[]
     end
 
+    @testset "change global streams under other scopes 2" begin
+        global_out = IOBuffer()
+
+        t = @task begin
+            for i in 1:10
+                println("$i")
+                sleep(0.5)
+            end
+        end
+
+        schedule(t)
+        sleep(1)
+
+        set_default_stdout(global_out)
+        sleep(2)
+        reset_default_stdout()
+        wait(t)
+
+        global_out_text = String(take!(global_out))
+        out_nums = split(global_out_text)
+        @test length(out_nums) > 3
+        @test out_nums[1] != "1"
+        @test out_nums[end] != "10"
+    end
+
+
     restore_stream()
 end

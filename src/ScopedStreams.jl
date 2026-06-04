@@ -209,16 +209,34 @@ function redirect_stream(f::Function, outfile, errfile, logfile; mode="a+")
     err = errfile == outfile ? out : handle_open(errfile, mode)
     log = logfile == outfile ? out : logfile == errfile ? err : handle_open_log(logfile, mode)
 
-    if isnothing(out)
-        out = deref(Base.stdout)
+    # this is necessary for (re)set_default_std(out/err) to work
+    # TODO: but a edge case: what if err is stdout?
+    if out === stdout_origin[]
+        out = nothing
     end
-    if isnothing(err)
-        err = deref(Base.stderr)
+    if err === stderr_origin[]
+        err = nothing
     end
 
     try
-        @with Base.stdout.ref=>out Base.stderr.ref=>err begin
-            this_with_logger(f, log)
+        if isnothing(out)
+            if isnothing(err)
+                this_with_logger(f, log)
+            else
+                @with Base.stderr.ref=>err begin
+                    this_with_logger(f, log)
+                end
+            end
+        else
+            if isnothing(err)
+                @with Base.stdout.ref=>out begin
+                    this_with_logger(f, log)
+                end
+            else
+                @with Base.stdout.ref=>out Base.stderr.ref=>err begin
+                    this_with_logger(f, log)
+                end
+            end
         end
     catch ex
         @static if isdefined(Base, :FieldError)  # julia v1.12 new Error type # COV_EXCL_LINE
