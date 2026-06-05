@@ -219,7 +219,10 @@ function redirect_stream(f::Function, outfile, errfile, logfile; mode="a+")
     end
 
     try
-        if isnothing(out)
+        if !(Base.stdout isa ScopedStream) || !(Base.stderr isa ScopedStream)
+            @warn("Fallback to default stdout and stderr because they are not thread-safe at this time. It is caused by function call of `Base.redirect_std***`. \nTo fix it, please run `ScopedStreams.__init__()` manually.")
+            this_with_logger(f, log)
+        elseif isnothing(out)
             if isnothing(err)
                 this_with_logger(f, log)
             else

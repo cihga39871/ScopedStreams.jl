@@ -1,5 +1,9 @@
 # CHANGE LOG
 
+## v1.0.1
+
+- Feat: the fall back warning is also displayed when stdout or stderr is not ScopedStream.
+
 ### v1.0.0
 
 - Breaking: `stdout_origin` and `stderr_origin` are now `const Ref{IO}` instead of plain variables; access them as `stdout_origin[]` / `stderr_origin[]`.
