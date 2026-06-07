@@ -259,9 +259,9 @@ function redirect_stream(f::Function, outfile, errfile, logfile; mode="a+")
         end
     finally
         # close or flush or do nothing
-        handle_finally(outfile, out)
-        handle_finally(errfile, err)
-        handle_finally(logfile, log)
+        out !== nothing && handle_finally(outfile, out)
+        err !== nothing && handle_finally(errfile, err)
+        log !== nothing && handle_finally(logfile, log)
     end
 end
 

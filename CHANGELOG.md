@@ -1,5 +1,9 @@
 # CHANGE LOG
 
+## v1.0.2
+
+- Fix: no flush when out is redefined to nothing.
+
 ## v1.0.1
 
 - Feat: the fall back warning is also displayed when stdout or stderr is not ScopedStream.
